@@ -1,12 +1,12 @@
 # NV-Tesseract
 
-NVIDIA Tesseract is an open-source time series analysis library built on the [MOMENT](https://github.com/moment-research/MOMENT) foundation model, covering forecasting, anomaly detection, and classification.
+NVIDIA Tesseract is an open-source time series analysis library covering forecasting, anomaly detection, and classification. The forecasting module builds on the [MOMENT](https://github.com/moment-research/MOMENT) foundation model; anomaly detection and classification are powered by NVIDIA's own proprietary algorithms.
 
 ## Overview
 
-- **Forecasting**: DataFrame-first API for long-horizon time series forecasting with DARR (context-enhanced) mode.
-- **Anomaly Detection** *(coming soon)*: Diffusion-based multivariate and transformer-based univariate anomaly detection.
-- **Classification** *(coming soon)*: Transformer-based tabular data classification.
+- **Forecasting**: DataFrame-first API for long-horizon time series forecasting with DARR (context-enhanced) mode, built on MOMENT.
+- **Anomaly Detection** *(coming soon)*: Diffusion-based multivariate and transformer-based univariate anomaly detection using novel proprietary algorithms.
+- **Classification** *(coming soon)*: Transformer-based tabular data classification using novel proprietary algorithms.
 
 ## Getting Started
 
@@ -124,3 +124,6 @@ This project is licensed under the Apache 2.0 License — see the `LICENSE` file
 ## References
 
 - [MOMENT: A Family of Open Time-series Foundation Models](https://github.com/moment-research/MOMENT)
+- M. Ravikiran, A. Gautam, A. Chulani. "Beyond MAE: Measuring Forecast Reliability with Temporal Dependence-Aware Error (TDE)." *2025 IEEE International Conference on Big Data (BigData)*, pp. 7271–7277, 2025.
+- A. Gautam, M. Ravikiran, F. S. Ekiz. "Memory-Augmented Forecasting: Scalability and Generalization Across Temporal Domains." *2025 IEEE International Conference on Big Data (BigData)*, pp. 7258–7265, 2025.
+- M. A. Li, A. Gautam. "Segmented Confidence Sequences and Multi-Scale Adaptive Confidence Segments for Anomaly Detection in Nonstationary Time Series." *Proceedings of the 2025 5th International Conference on Artificial Intelligence and Application Technologies*, pp. 6–15, 2025.
