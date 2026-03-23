@@ -121,6 +121,12 @@ NV-Tesseract/
 
 This project is licensed under the Apache 2.0 License — see the `LICENSE` file for details.
 
+## Blogs
+
+- [New NVIDIA NV-Tesseract Time Series Models Advance Dataset Processing and Anomaly Detection](https://developer.nvidia.com/blog/new-nvidia-nv-tesseract-time-series-models-advance-dataset-processing-and-anomaly-detection/)
+- [Smarter Anomaly Detection in Semiconductor Manufacturing with NV-Tesseract and NVIDIA Inference Microservices](https://developer.nvidia.com/blog/smarter-anomaly-detection-in-semiconductor-manufacturing-with-nvidia-nv-tesseract-and-nvidia-nim/)
+- [NV-Tesseract-AD: Diffusion-Based Anomaly Detection with Curriculum Learning Across Industries](https://developer.nvidia.com/blog/advancing-anomaly-detection-for-industry-applications-with-nvidia-nv-tesseract-ad/)
+
 ## References
 
 - [MOMENT: A Family of Open Time-series Foundation Models](https://github.com/moment-research/MOMENT)
