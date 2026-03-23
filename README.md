@@ -1,14 +1,12 @@
 # NV-Tesseract
 
-NVIDIA Tesseract is an open-source time series forecasting SDK built on the [MOMENT](https://github.com/moment-research/MOMENT) foundation model. It provides a simple DataFrame-first API for running forecasting inference, with support for autoregressive horizon extension and context-enhanced (DARR) predictions.
+NVIDIA Tesseract is an open-source time series analysis library built on the [MOMENT](https://github.com/moment-research/MOMENT) foundation model, covering forecasting, anomaly detection, and classification.
 
 ## Overview
 
-- **DataFrame-first API**: Works directly with pandas DataFrames; automatically detects numeric feature columns.
-- **Autoregressive horizon extension**: Repeats the model prediction window when `forecast_horizon` exceeds the model's native horizon.
-- **DARR mode**: Blends direct model output with kNN-based context memory for context-enhanced predictions, with configurable `alpha`, `k`, and `temperature`.
-- **Robust preprocessing**: Converts timestamps, fills numeric NULLs with zeros, enforces minimum sequence length, and standardizes input.
-- **Column alignment**: Automatically handles datasets with different feature sets by aligning to common columns.
+- **Forecasting**: DataFrame-first API for long-horizon time series forecasting with DARR (context-enhanced) mode.
+- **Anomaly Detection** *(coming soon)*: Diffusion-based multivariate and transformer-based univariate anomaly detection.
+- **Classification** *(coming soon)*: Transformer-based tabular data classification.
 
 ## Getting Started
 
@@ -29,7 +27,7 @@ cd NV-Tesseract
 ### Quick Start
 
 ```python
-from sdk import perform_forecasting
+from forecasting.sdk import perform_forecasting
 import pandas as pd
 import numpy as np
 
@@ -75,15 +73,15 @@ darr_result = perform_forecasting(
 
 ## Usage
 
-See [`sdk/README.md`](sdk/README.md) for full API reference, parameter descriptions, output format, and error handling details.
+See [`forecasting/sdk/README.md`](forecasting/sdk/README.md) for full API reference, parameter descriptions, output format, and error handling details.
 
-See [`sdk/quick_example.py`](sdk/quick_example.py) for an end-to-end runnable script.
+See [`forecasting/sdk/quick_example.py`](forecasting/sdk/quick_example.py) for an end-to-end runnable script.
 
 ## Capabilities
 
 | Module | Status | Description |
 |--------|--------|-------------|
-| `sdk/` (Forecasting) | Available | Time series forecasting with DARR mode |
+| `forecasting/` | Available | Time series forecasting with DARR mode |
 | `ad_diffusion/` | Coming soon | Diffusion-based multivariate anomaly detection |
 | `ad_transformer/` | Coming soon | Transformer-based univariate anomaly detection & classification |
 
@@ -91,15 +89,16 @@ See [`sdk/quick_example.py`](sdk/quick_example.py) for an end-to-end runnable sc
 
 ```
 NV-Tesseract/
-├── __init__.py                  # Package init; exports perform_forecasting, DEVICE
-├── model.py                     # Model construction (build_model, count_trainable_params)
-├── dataset_longhorizon.py       # Dataset classes for long-horizon forecasting
-├── sdk/                         # Forecasting SDK (available)
-│   ├── forecasting.py           # Core perform_forecasting() implementation
-│   ├── quick_example.py         # End-to-end usage example
-│   ├── README.md                # Full SDK API reference
-│   └── tests/
-│       └── datasets/            # Sample datasets for testing
+├── forecasting/                 # Forecasting module (available)
+│   ├── __init__.py              # Exports perform_forecasting, DEVICE
+│   ├── model.py                 # Model construction utilities
+│   ├── dataset_longhorizon.py   # Dataset classes for long-horizon forecasting
+│   └── sdk/
+│       ├── forecasting.py       # Core perform_forecasting() implementation
+│       ├── quick_example.py     # End-to-end usage example
+│       ├── README.md            # Full SDK API reference
+│       └── tests/
+│           └── datasets/        # Sample datasets for testing
 ├── ad_diffusion/                # Multivariate anomaly detection (coming soon)
 └── ad_transformer/              # Univariate anomaly detection & classification (coming soon)
 ```
