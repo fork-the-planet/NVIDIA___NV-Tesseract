@@ -1,0 +1,43 @@
+# Python
+*.pyc
+*.pyo
+__pycache__/
+*.egg-info/
+dist/
+build/
+*.ipynb_checkpoints
+.ipynb_checkpoints/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+*.env
+
+# OS
+.DS_Store
+.idea/
+.vscode/
+
+# Model artifacts & weights
+*.pt
+*.pkl
+artifacts_*/
+cached_artifacts/
+finetune_result/
+model_weights/
+
+# Data & outputs
+*.csv
+!sdk/tests/datasets/*.csv
+preprocessed_data.pt
+interpretability_output/
+
+# Logs & plots
+*.png
+*.log
+*.zip
+*.pdf
