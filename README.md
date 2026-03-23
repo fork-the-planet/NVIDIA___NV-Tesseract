@@ -1,6 +1,6 @@
 # NV-Tesseract
 
-NVIDIA Tesseract is an open-source time series analysis library covering forecasting, anomaly detection, and classification. The forecasting module builds on the [MOMENT](https://github.com/moment-research/MOMENT) foundation model; anomaly detection and classification are powered by NVIDIA's own proprietary algorithms.
+NVIDIA Tesseract is an open-source time series analysis library covering forecasting, anomaly detection, and classification. The forecasting module builds on the [MOMENT](https://github.com/moment-timeseries-foundation-model/moment/tree/main/momentfm) foundation model; anomaly detection and classification are powered by NVIDIA's own proprietary algorithms.
 
 ## Overview
 
@@ -68,7 +68,7 @@ darr_result = perform_forecasting(
 - Python 3.9+
 - PyTorch 2.0+
 - pandas, numpy
-- [MOMENT](https://github.com/moment-research/MOMENT) (`AutonLab/MOMENT-1-large`)
+- [MOMENT](https://github.com/moment-timeseries-foundation-model/moment/tree/main/momentfm) (`AutonLab/MOMENT-1-large`)
 - GPU recommended (CUDA or Apple MPS); falls back to CPU automatically
 
 ## Usage
@@ -129,7 +129,7 @@ This project is licensed under the Apache 2.0 License — see the `LICENSE` file
 
 ## References
 
-- [MOMENT: A Family of Open Time-series Foundation Models](https://github.com/moment-research/MOMENT)
+- [MOMENT: A Family of Open Time-series Foundation Models](https://github.com/moment-timeseries-foundation-model/moment/tree/main/momentfm)
 - M. Ravikiran, A. Gautam, A. Chulani. "Beyond MAE: Measuring Forecast Reliability with Temporal Dependence-Aware Error (TDE)." *2025 IEEE International Conference on Big Data (BigData)*, pp. 7271–7277, 2025.
 - A. Gautam, M. Ravikiran, F. S. Ekiz. "Memory-Augmented Forecasting: Scalability and Generalization Across Temporal Domains." *2025 IEEE International Conference on Big Data (BigData)*, pp. 7258–7265, 2025.
 - M. A. Li, A. Gautam. "Segmented Confidence Sequences and Multi-Scale Adaptive Confidence Segments for Anomaly Detection in Nonstationary Time Series." *Proceedings of the 2025 5th International Conference on Artificial Intelligence and Application Technologies*, pp. 6–15, 2025.
