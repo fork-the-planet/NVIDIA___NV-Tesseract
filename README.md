@@ -79,6 +79,14 @@ See [`sdk/README.md`](sdk/README.md) for full API reference, parameter descripti
 
 See [`sdk/quick_example.py`](sdk/quick_example.py) for an end-to-end runnable script.
 
+## Capabilities
+
+| Module | Status | Description |
+|--------|--------|-------------|
+| `sdk/` (Forecasting) | Available | Time series forecasting with DARR mode |
+| `ad_diffusion/` | Coming soon | Diffusion-based multivariate anomaly detection |
+| `ad_transformer/` | Coming soon | Transformer-based univariate anomaly detection & classification |
+
 ## Repository Structure
 
 ```
@@ -86,14 +94,14 @@ NV-Tesseract/
 ├── __init__.py                  # Package init; exports perform_forecasting, DEVICE
 ├── model.py                     # Model construction (build_model, count_trainable_params)
 ├── dataset_longhorizon.py       # Dataset classes for long-horizon forecasting
-└── sdk/
-    ├── __init__.py
-    ├── forecasting.py           # Core perform_forecasting() implementation
-    ├── quick_example.py         # End-to-end usage example
-    ├── README.md                # Full SDK API reference
-    └── tests/
-        ├── test_forecasting.py
-        └── datasets/            # Sample datasets for testing
+├── sdk/                         # Forecasting SDK (available)
+│   ├── forecasting.py           # Core perform_forecasting() implementation
+│   ├── quick_example.py         # End-to-end usage example
+│   ├── README.md                # Full SDK API reference
+│   └── tests/
+│       └── datasets/            # Sample datasets for testing
+├── ad_diffusion/                # Multivariate anomaly detection (coming soon)
+└── ad_transformer/              # Univariate anomaly detection & classification (coming soon)
 ```
 
 ## Contribution Guidelines
