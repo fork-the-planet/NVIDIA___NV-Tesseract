@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from tesseract_oss.sdk.forecasting import perform_forecasting
+from forecasting.sdk.forecasting import perform_forecasting
 
 # Load your CSV file
 csv_path = (

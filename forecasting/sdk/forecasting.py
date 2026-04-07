@@ -13,15 +13,15 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-sys.path.append(str(Path(__file__).parent.parent))
-from dataset_longhorizon import (
+sys.path.append(str(Path(__file__).parent.parent.parent))
+from forecasting.dataset_longhorizon import (
     CSVLongHorizonSimpleDataset,
     Standardizer,
 )
-from model import build_model
+from forecasting.model import build_model
 from momentfm.utils.utils import control_randomness
 
-from tesseract_oss import DEVICE
+from forecasting import DEVICE
 
 
 class InferenceOnlyDataset(Dataset):

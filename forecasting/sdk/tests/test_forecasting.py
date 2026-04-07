@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 import torch
 
-from tesseract_oss.sdk import forecasting
+from forecasting.sdk import forecasting
 
 
 class DummyModel:
