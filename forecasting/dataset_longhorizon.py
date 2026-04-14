@@ -22,7 +22,7 @@ def _is_ydf(df: Any) -> bool:
 
 class NixtlaLongHorizonDataset(Dataset):
     """
-    MOMENT-ready windows from Nixtla Long Horizon.
+    Backbone-ready windows from Nixtla Long Horizon.
 
     Policy:
       - Train uses Nixtla TRAIN split if available, else prefix (temporal).

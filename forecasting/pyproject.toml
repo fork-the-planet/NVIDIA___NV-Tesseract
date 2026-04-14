@@ -7,7 +7,6 @@ requires-python = ">=3.10"
 dependencies = [
     "datasetsforecast>=1.0.0",
     "joblib>=1.5.2",
-    "momentfm @ git+https://github.com/moment-timeseries-foundation-model/moment.git@38f7310ad594100747ca2a8357e9c7ca7d323e0e",
     "pandas>=2.1.0",
     "pytest-xdist>=3.8.0",
     "numpy>=1.24.0",

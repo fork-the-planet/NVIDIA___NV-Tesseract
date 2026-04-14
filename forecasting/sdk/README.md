@@ -39,7 +39,7 @@ forecasts = perform_forecasting(
     df=df,
     seq_len=512,
     forecast_horizon=72,
-    ckpt="artifacts_512_72/moment_head_512_6hr.pt",
+    ckpt="artifacts_512_72/forecast_head_512_6hr.pt",
     standardizer_pkl="artifacts_512_72/standardizer.pkl",
 )
 
@@ -63,7 +63,7 @@ darr_result = perform_forecasting(
     alpha=0.2,  # 20% direct, 80% kNN
     k=64,
     temperature=0.05,
-    ckpt="artifacts_512_72/moment_head_512_6hr.pt",
+    ckpt="artifacts_512_72/forecast_head_512_6hr.pt",
     standardizer_pkl="artifacts_512_72/standardizer.pkl",
 )
 
@@ -119,7 +119,7 @@ perform_forecasting(
     
     # Model configuration
     standardizer_pkl: str = "artifacts_512_72/standardizer.pkl",
-    ckpt: str = "artifacts_512_72/moment_head_512_6hr.pt",
+    ckpt: str = "artifacts_512_72/forecast_head_512_6hr.pt",
     seq_len: int = 512,
     forecast_horizon: int = 72,
     model_horizon: int = 72,
@@ -133,7 +133,7 @@ perform_forecasting(
     temperature: float = 0.05,
     
     # Additional parameters
-    model_name: str = "AutonLab/MOMENT-1-large",
+    model_name: str = "configured pretrained backbone identifier",
     batch_size: int = 8,
     num_workers: int = 2,
     stride: Optional[int] = None,

@@ -52,7 +52,7 @@ if __name__ == "__main__":
         target_column=target_col,
         save_preds="forecast_ETTh_seq_len_100.csv",
         # Optional: specify custom paths
-        # ckpt="artifacts_512_72/moment_head_512_6hr.pt",
+        # ckpt="artifacts_512_72/forecast_head_512_6hr.pt",
         # standardizer_pkl="artifacts_512_72/standardizer.pkl",
     )
     print(f"\nStandard forecast (only predicted rows with '{target_col}_forecast' column):")

@@ -1,10 +1,10 @@
 # NV-Tesseract
 
-NVIDIA Tesseract is an open-source time series analysis library covering forecasting, anomaly detection, and classification. The forecasting module builds on the [MOMENT](https://github.com/moment-timeseries-foundation-model/moment/tree/main/momentfm) foundation model; anomaly detection and classification are powered by NVIDIA's own proprietary algorithms.
+NVIDIA Tesseract is an open-source time series analysis library covering forecasting, anomaly detection, and classification. The forecasting module builds on a vendored pretrained transformer backbone; anomaly detection and classification are powered by NVIDIA's own proprietary algorithms.
 
 ## Overview
 
-- **Forecasting**: DataFrame-first API for long-horizon time series forecasting with DARR (context-enhanced) mode, built on MOMENT.
+- **Forecasting**: DataFrame-first API for long-horizon time series forecasting with DARR (context-enhanced) mode, built on a vendored backbone.
 - **Anomaly Detection** *(coming soon)*: Diffusion-based multivariate and transformer-based univariate anomaly detection using novel proprietary algorithms.
 - **Classification** *(coming soon)*: Transformer-based tabular data classification using novel proprietary algorithms.
 
@@ -13,11 +13,10 @@ NVIDIA Tesseract is an open-source time series analysis library covering forecas
 ### Installation
 
 ```bash
-pip install moment-research  # MOMENT foundation model dependency
 pip install pandas numpy torch
 ```
 
-Then clone this repo and import directly:
+Then clone this repo and import directly. Forecasting vendors the backbone implementation locally, so no separate backbone package install is required:
 
 ```bash
 git clone https://github.com/NVIDIA/NV-Tesseract.git
@@ -41,7 +40,7 @@ forecasts = perform_forecasting(
     df=df,
     seq_len=512,
     forecast_horizon=72,
-    ckpt="artifacts_512_72/moment_head_512_6hr.pt",
+    ckpt="artifacts_512_72/forecast_head_512_6hr.pt",
     standardizer_pkl="artifacts_512_72/standardizer.pkl",
 )
 # Returns a DataFrame with `target_forecast` column containing 72 predictions
@@ -58,7 +57,7 @@ darr_result = perform_forecasting(
     alpha=0.2,   # 20% direct, 80% kNN
     k=64,
     temperature=0.05,
-    ckpt="artifacts_512_72/moment_head_512_6hr.pt",
+    ckpt="artifacts_512_72/forecast_head_512_6hr.pt",
     standardizer_pkl="artifacts_512_72/standardizer.pkl",
 )
 ```
@@ -68,7 +67,7 @@ darr_result = perform_forecasting(
 - Python 3.9+
 - PyTorch 2.0+
 - pandas, numpy
-- [MOMENT](https://github.com/moment-timeseries-foundation-model/moment/tree/main/momentfm) (`AutonLab/MOMENT-1-large`)
+- Pretrained transformer backbone weights
 - GPU recommended (CUDA or Apple MPS); falls back to CPU automatically
 
 ## Usage
@@ -128,8 +127,6 @@ This project is licensed under the Apache 2.0 License — see the `LICENSE` file
 - [NV-Tesseract-AD: Diffusion-Based Anomaly Detection with Curriculum Learning Across Industries](https://developer.nvidia.com/blog/advancing-anomaly-detection-for-industry-applications-with-nvidia-nv-tesseract-ad/)
 
 ## References
-
-- [MOMENT: A Family of Open Time-series Foundation Models](https://github.com/moment-timeseries-foundation-model/moment/tree/main/momentfm)
 - M. Ravikiran, A. Gautam, A. Chulani. "Beyond MAE: Measuring Forecast Reliability with Temporal Dependence-Aware Error (TDE)." *2025 IEEE International Conference on Big Data (BigData)*, pp. 7271–7277, 2025.
 - A. Gautam, M. Ravikiran, F. S. Ekiz. "Memory-Augmented Forecasting: Scalability and Generalization Across Temporal Domains." *2025 IEEE International Conference on Big Data (BigData)*, pp. 7258–7265, 2025.
 - M. A. Li, A. Gautam. "Segmented Confidence Sequences and Multi-Scale Adaptive Confidence Segments for Anomaly Detection in Nonstationary Time Series." *Proceedings of the 2025 5th International Conference on Artificial Intelligence and Application Technologies*, pp. 6–15, 2025.
