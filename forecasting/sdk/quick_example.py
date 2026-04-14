@@ -33,7 +33,7 @@ if __name__ == "__main__":
         print("2024-01-01 01:00:00,1.7")
         print("...")
         raise SystemExit("Data file required")
-        
+
     # Model weights will be auto-downloaded from Hugging Face on first run
     # You can also specify custom paths if you have the files locally
     df = pd.read_csv(csv_path)

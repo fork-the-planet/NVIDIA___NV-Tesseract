@@ -1,0 +1,23 @@
+.DEFAULT_GOAL := help
+
+# Ruff config and roots (keep Ruff spec in sync with [dependency-groups] dev in forecasting/pyproject.toml)
+RUFF_CONFIG := forecasting/pyproject.toml
+RUFF_SPEC := ruff>=0.8.0
+LINT_PATHS := forecasting ad_diffusion
+UVX_RUFF := uvx --from "$(RUFF_SPEC)" ruff
+
+.PHONY: help lint lint-fix
+
+help:
+	@echo "Targets:"
+	@echo "  make lint      - Ruff lint + format check ($(LINT_PATHS))"
+	@echo "  make lint-fix  - Auto-fix Ruff issues and apply formatting ($(LINT_PATHS))"
+	@echo "Requires: uv (https://docs.astral.sh/uv/)"
+
+lint:
+	$(UVX_RUFF) check $(LINT_PATHS) --config $(RUFF_CONFIG)
+	$(UVX_RUFF) format --check $(LINT_PATHS) --config $(RUFF_CONFIG)
+
+lint-fix:
+	$(UVX_RUFF) check --fix $(LINT_PATHS) --config $(RUFF_CONFIG)
+	$(UVX_RUFF) format $(LINT_PATHS) --config $(RUFF_CONFIG)
