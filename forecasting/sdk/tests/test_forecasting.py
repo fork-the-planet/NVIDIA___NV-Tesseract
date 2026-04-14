@@ -63,17 +63,17 @@ def make_timeseries_with_columns(num_rows: int = 10, columns: list[str] | None =
     """Create a timeseries DataFrame with specified columns."""
     if columns is None:
         columns = ["feature1", "feature2"]
-    
+
     timestamps = pd.date_range("2024-01-01", periods=num_rows, freq="H")
     data = {
         "timestamp": timestamps,
         "target": np.arange(num_rows, dtype=np.float32),
     }
-    
+
     # Add the specified feature columns
     for i, col in enumerate(columns):
         data[col] = np.linspace(i, i + 1.0, num_rows, dtype=np.float32)
-    
+
     return pd.DataFrame(data)
 
 
@@ -698,10 +698,7 @@ def test_perform_forecasting_darr_mode_column_mismatch_no_common_columns():
 def test_perform_forecasting_darr_mode_column_mismatch_many_vs_few():
     """DARR mode handles extreme case of many columns vs few columns."""
     # Input dataset with many columns (7 columns like ETTh.csv)
-    df = make_timeseries_with_columns(
-        num_rows=10, 
-        columns=["HUFL", "HULL", "MUFL", "MULL", "LUFL", "OT", "extra"]
-    )
+    df = make_timeseries_with_columns(num_rows=10, columns=["HUFL", "HULL", "MUFL", "MULL", "LUFL", "OT", "extra"])
     # Context dataset with only 3 columns (like ETTh_short.csv)
     context_df = make_timeseries_with_columns(num_rows=10, columns=["HUFL", "HULL", "MUFL"])
 

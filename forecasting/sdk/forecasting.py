@@ -2,7 +2,6 @@ import json
 import os
 
 # Import required modules from parent directory
-import sys
 import tempfile
 from pathlib import Path
 
@@ -15,6 +14,7 @@ from tqdm import tqdm
 
 try:
     from huggingface_hub import hf_hub_download
+
     HF_HUB_AVAILABLE = True
 except ImportError:
     HF_HUB_AVAILABLE = False
@@ -28,7 +28,7 @@ from model import build_model
 from momentfm.utils.utils import control_randomness
 
 # Define DEVICE here to avoid import complexity
-import torch
+
 
 def _has_mps():
     try:
@@ -36,10 +36,9 @@ def _has_mps():
     except:
         return False
 
+
 DEVICE = (
-    torch.device("cuda") if torch.cuda.is_available() 
-    else torch.device("mps") if _has_mps() 
-    else torch.device("cpu")
+    torch.device("cuda") if torch.cuda.is_available() else torch.device("mps") if _has_mps() else torch.device("cpu")
 )
 
 
@@ -47,46 +46,45 @@ def download_model_weights(
     standardizer_pkl: str = "standardizer.pkl",
     ckpt: str = "moment_head_512_6hr.pt",
     repo_id: str = "nvidia/nv-tesseract-forecasting",
-    force_download: bool = False
+    force_download: bool = False,
 ) -> tuple[str, str]:
     """
     Auto-download model weights from Hugging Face if they don't exist locally.
-    
+
     Args:
         standardizer_pkl: Local path for standardizer pickle file
         ckpt: Local path for model checkpoint
         repo_id: Hugging Face repository ID
         force_download: Force re-download even if files exist
-        
+
     Returns:
         Tuple of (standardizer_path, checkpoint_path)
-        
+
     Raises:
         ImportError: If huggingface_hub is not installed
         Exception: If download fails
     """
     standardizer_path = Path(standardizer_pkl)
     checkpoint_path = Path(ckpt)
-    
+
     # Check if files already exist
     if not force_download and standardizer_path.exists() and checkpoint_path.exists():
         return str(standardizer_path), str(checkpoint_path)
-    
+
     # Check if huggingface_hub is available
     if not HF_HUB_AVAILABLE:
         raise ImportError(
-            "huggingface_hub is required to download model weights. "
-            "Install it with: uv add huggingface_hub"
+            "huggingface_hub is required to download model weights. Install it with: uv add huggingface_hub"
         )
-    
+
     print("Downloading model weights from Hugging Face...")
-    
+
     # Create parent directories if they don't exist (in case user specifies subdirectories)
-    if standardizer_path.parent != Path("."):
+    if standardizer_path.parent != Path():
         standardizer_path.parent.mkdir(parents=True, exist_ok=True)
-    if checkpoint_path.parent != Path("."):
+    if checkpoint_path.parent != Path():
         checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     try:
         # Download standardizer
         if force_download or not standardizer_path.exists():
@@ -94,22 +92,22 @@ def download_model_weights(
             downloaded_file = hf_hub_download(
                 repo_id=repo_id,
                 filename=standardizer_path.name,
-                local_dir=str(standardizer_path.parent) if standardizer_path.parent != Path(".") else ".",
+                local_dir=str(standardizer_path.parent) if standardizer_path.parent != Path() else ".",
                 local_dir_use_symlinks=False,
             )
             print(f"✓ Downloaded {standardizer_path}")
-        
+
         # Download checkpoint
         if force_download or not checkpoint_path.exists():
             print(f"Downloading {checkpoint_path.name}...")
             downloaded_file = hf_hub_download(
                 repo_id=repo_id,
                 filename=checkpoint_path.name,
-                local_dir=str(checkpoint_path.parent) if checkpoint_path.parent != Path(".") else ".",
+                local_dir=str(checkpoint_path.parent) if checkpoint_path.parent != Path() else ".",
                 local_dir_use_symlinks=False,
             )
             print(f"✓ Downloaded {checkpoint_path}")
-            
+
     except Exception as e:
         error_msg = f"Failed to download model weights: {e}"
         if "401" in str(e) or "403" in str(e):
@@ -120,7 +118,7 @@ def download_model_weights(
                 "\n3. Or set token: export HUGGINGFACE_HUB_TOKEN='your_token'"
             )
         raise Exception(error_msg) from e
-    
+
     return str(standardizer_path), str(checkpoint_path)
 
 
@@ -461,7 +459,6 @@ def perform_forecasting(
     if forecast_horizon > MAX_FORECAST_HORIZON:
         raise ValueError(f"forecast_horizon must be <= {MAX_FORECAST_HORIZON}, got {forecast_horizon}")
 
-
     # Input validation
     if df is None or df.empty:
         raise ValueError("Input DataFrame is required and cannot be empty")
@@ -530,10 +527,7 @@ def perform_forecasting(
 
     # Auto-download model weights if they don't exist
     try:
-        standardizer_pkl, ckpt = download_model_weights(
-            standardizer_pkl=standardizer_pkl,
-            ckpt=ckpt
-        )
+        standardizer_pkl, ckpt = download_model_weights(standardizer_pkl=standardizer_pkl, ckpt=ckpt)
     except Exception as e:
         print(f"Warning: Could not auto-download weights: {e}")
         print("Using provided paths as-is. Make sure the files exist locally.")
@@ -596,22 +590,22 @@ def perform_forecasting(
             # Ensure target column is included
             if target_column in context_numeric:
                 context_numeric.remove(target_column)
-            
+
             # COLUMN COMPATIBILITY CHECK AND ALIGNMENT
             # Find intersection of numeric columns between main and context datasets
             main_numeric_set = set(numeric_columns)
             context_numeric_set = set(context_numeric)
-            
+
             # Common columns (excluding target which is always included)
             common_columns = main_numeric_set.intersection(context_numeric_set)
-            
+
             # Check if we have column compatibility issues
             if len(main_numeric_set) != len(context_numeric_set) or main_numeric_set != context_numeric_set:
-                print(f"Warning: Column mismatch detected between input and context datasets")
+                print("Warning: Column mismatch detected between input and context datasets")
                 print(f"  Input dataset columns: {sorted(main_numeric_set)}")
                 print(f"  Context dataset columns: {sorted(context_numeric_set)}")
                 print(f"  Common columns: {sorted(common_columns)}")
-                
+
                 if len(common_columns) == 0:
                     raise ValueError(
                         f"No common numeric columns found between input and context datasets.\n"
@@ -619,13 +613,13 @@ def perform_forecasting(
                         f"Context dataset has: {sorted(context_numeric_set)}\n"
                         f"For DARR mode to work, both datasets must share at least some numeric columns."
                     )
-                
+
                 print(f"  Using only common columns for consistent predictions: {sorted(common_columns)}")
-                
+
                 # Update both datasets to use only common columns
                 columns_to_process = [target_column] + sorted(common_columns)
                 context_columns_to_use = [timestamp_column, target_column] + sorted(common_columns)
-                
+
                 # Re-save the main CSV with aligned columns
                 csv_df = working_df[[timestamp_column] + columns_to_process].copy()
                 csv_df.rename(columns={timestamp_column: "timestamp"}, inplace=True)
@@ -751,7 +745,7 @@ def perform_forecasting(
                     f"This typically occurs when input and context datasets have different numbers of columns.\n"
                     f"Ensure both datasets have the same numeric columns, or the column alignment failed."
                 )
-            
+
             # Hybrid predictions
             preds_hybrid = alpha * preds_direct + (1 - alpha) * preds_knn
 
