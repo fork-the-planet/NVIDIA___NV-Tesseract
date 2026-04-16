@@ -1,6 +1,6 @@
 # NV-Tesseract
 
-NVIDIA Tesseract is an open-source time series analysis library covering forecasting, anomaly detection, and classification. The forecasting module builds on a vendored pretrained transformer backbone; anomaly detection and classification are powered by NVIDIA's own proprietary algorithms.
+NVIDIA Tesseract is an open-source time series analysis library covering forecasting, anomaly detection, and classification. The forecasting module builds on a pretrained transformer backbone; anomaly detection and classification are powered by NVIDIA's own proprietary algorithms.
 
 ## Overview
 
@@ -12,21 +12,20 @@ NVIDIA Tesseract is an open-source time series analysis library covering forecas
 
 ### Installation
 
-```bash
-pip install pandas numpy torch
-```
-
-Then clone this repo and import directly. Forecasting vendors the backbone implementation locally, so no separate backbone package install is required:
+Clone the repo and install the forecasting package (includes PyTorch, Hugging Face Hub, and the vendored backbone dependencies):
 
 ```bash
 git clone https://github.com/NVIDIA/NV-Tesseract.git
-cd NV-Tesseract
+cd NV-Tesseract/forecasting
+uv sync --python 3.12   # or: pip install -e .
 ```
+
+Use the same interpreter/venv when you run the examples below.
 
 ### Quick Start
 
 ```python
-from forecasting.sdk import perform_forecasting
+from sdk.forecasting import perform_forecasting
 import pandas as pd
 import numpy as np
 
@@ -40,8 +39,6 @@ forecasts = perform_forecasting(
     df=df,
     seq_len=512,
     forecast_horizon=72,
-    ckpt="artifacts_512_72/forecast_head_512_6hr.pt",
-    standardizer_pkl="artifacts_512_72/standardizer.pkl",
 )
 # Returns a DataFrame with `target_forecast` column containing 72 predictions
 ```
@@ -57,8 +54,6 @@ darr_result = perform_forecasting(
     alpha=0.2,   # 20% direct, 80% kNN
     k=64,
     temperature=0.05,
-    ckpt="artifacts_512_72/forecast_head_512_6hr.pt",
-    standardizer_pkl="artifacts_512_72/standardizer.pkl",
 )
 ```
 

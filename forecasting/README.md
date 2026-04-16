@@ -104,8 +104,8 @@ forecasting/
 │   └── tests/            # Test files and datasets
 ├── dataset_longhorizon.py # Dataset utilities
 ├── model.py              # Model building utilities
-├── standardizer.pkl      # Model weights (auto-downloaded on first use)
-└── forecast_head_512_6hr.pt
+├── standardizer.pkl      # Normalization params (auto-downloaded on first use)
+└── moment_head_512_6hr.pt  # Head checkpoint (auto-downloaded on first use)
 ```
 
 ## Dependencies
@@ -145,7 +145,7 @@ The forecasting model requires pre-trained weights from the Hugging Face reposit
 - Repository: `nvidia/nv-tesseract-forecasting`
 - Required files (auto-downloaded to current directory):
   - `standardizer.pkl` - Data normalization parameters
-  - `forecast_head_512_6hr.pt` - Model checkpoint for 6-hour forecasting
+  - `moment_head_512_6hr.pt` - Model checkpoint for 6-hour forecasting
 
 ## Usage Examples
 

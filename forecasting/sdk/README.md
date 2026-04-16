@@ -24,7 +24,7 @@ uv sync
 ### Standard inference
 
 ```python
-from tesseract_forecasting.sdk import perform_forecasting
+from sdk.forecasting import perform_forecasting
 import pandas as pd
 import numpy as np
 
@@ -39,8 +39,6 @@ forecasts = perform_forecasting(
     df=df,
     seq_len=512,
     forecast_horizon=72,
-    ckpt="artifacts_512_72/forecast_head_512_6hr.pt",
-    standardizer_pkl="artifacts_512_72/standardizer.pkl",
 )
 
 # Result contains a `target_forecast` column with `forecast_horizon` rows
@@ -63,8 +61,6 @@ darr_result = perform_forecasting(
     alpha=0.2,  # 20% direct, 80% kNN
     k=64,
     temperature=0.05,
-    ckpt="artifacts_512_72/forecast_head_512_6hr.pt",
-    standardizer_pkl="artifacts_512_72/standardizer.pkl",
 )
 
 # DARR output includes hybrid, direct, and kNN forecast columns
@@ -118,8 +114,8 @@ perform_forecasting(
     context_df: Optional[pd.DataFrame] = None,
     
     # Model configuration
-    standardizer_pkl: str = "artifacts_512_72/standardizer.pkl",
-    ckpt: str = "artifacts_512_72/forecast_head_512_6hr.pt",
+    standardizer_pkl: str = "standardizer.pkl",
+    ckpt: str = "moment_head_512_6hr.pt",
     seq_len: int = 512,
     forecast_horizon: int = 72,
     model_horizon: int = 72,

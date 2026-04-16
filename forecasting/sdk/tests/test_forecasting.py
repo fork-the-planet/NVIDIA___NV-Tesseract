@@ -4,8 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import torch
-
-from forecasting.sdk import forecasting
+from sdk import forecasting
 
 
 class DummyModel:
