@@ -1,7 +1,16 @@
-import torch
-from momentfm import MOMENTPipeline
+import os
 
-DEFAULT_MODEL_NAME = "AutonLab/MOMENT-1-large"
+import torch
+
+try:
+    from backbone import BackbonePipeline
+except ImportError:
+    from forecasting.backbone import BackbonePipeline
+
+DEFAULT_MODEL_NAME = os.environ.get(
+    "TESSERACT_BACKBONE_MODEL",
+    "AutonLab/MOMENT-1-large",
+)
 
 
 def build_model(
@@ -17,9 +26,9 @@ def build_model(
     device: str | None = None,
 ) -> torch.nn.Module:
     """
-    Constructs and initializes MOMENT for forecasting with a trainable head.
+    Constructs and initializes the forecasting backbone with a trainable head.
     """
-    pipe = MOMENTPipeline.from_pretrained(
+    pipe = BackbonePipeline.from_pretrained(
         model_name,
         model_kwargs={
             "task_name": "forecasting",

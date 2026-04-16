@@ -104,8 +104,8 @@ forecasting/
 │   └── tests/            # Test files and datasets
 ├── dataset_longhorizon.py # Dataset utilities
 ├── model.py              # Model building utilities
-├── standardizer.pkl      # Model weights (auto-downloaded on first use)
-└── moment_head_512_6hr.pt
+├── standardizer.pkl      # Normalization params (auto-downloaded on first use)
+└── moment_head_512_6hr.pt  # Head checkpoint (auto-downloaded on first use)
 ```
 
 ## Dependencies
@@ -113,7 +113,7 @@ forecasting/
 ### Core Dependencies
 - `datasetsforecast>=1.0.0` - Dataset utilities for forecasting
 - `joblib>=1.5.2` - Serialization for model artifacts
-- `momentfm` - MOMENT foundation model (installed from GitHub main branch)
+- vendored `backbone.py` - forecasting backbone implementation bundled in this package
 - `pandas>=2.1.0` - Data manipulation
 - `numpy>=1.24.0` - Numerical computing
 - `torch>=2.0.0` - Deep learning framework
@@ -128,8 +128,7 @@ forecasting/
 - `mac-mps` group: Optimized PyTorch for Apple Silicon
 
 ### Note on Dependencies
-- `momentfm` is installed directly from GitHub (commit `38f7310a`) since version 0.1.5 is not yet released on PyPI
-- This ensures compatibility with the latest MOMENT foundation model features
+- `backbone.py` is vendored directly in this package, so forecasting no longer depends on the external backbone package
 
 ## Configuration
 
@@ -197,7 +196,7 @@ results = perform_forecasting(
     df=df,
     forecast_horizon=72,
     standardizer_pkl="custom/path/standardizer.pkl",  # Default: "standardizer.pkl"
-    ckpt="custom/path/model_checkpoint.pt"            # Default: "moment_head_512_6hr.pt"
+    ckpt="custom/path/model_checkpoint.pt"            # Default: packaged forecast checkpoint path
 )
 ```
 
@@ -232,8 +231,8 @@ If UV installation fails:
 3. Use pipx: `pipx install uv`
 
 ### Dependency Resolution Issues
-If you see errors about `momentfm>=0.1.5` not being available:
-- This is expected - we install `momentfm` directly from GitHub since v0.1.5 isn't on PyPI yet
+If you see stale environment errors referring to an old backbone package:
+- remove the old lockfile environment and reinstall; forecasting now vendors the backbone implementation locally
 - The `pyproject.toml` is configured to handle this automatically
 - Make sure `tool.hatch.metadata.allow-direct-references = true` is set
 

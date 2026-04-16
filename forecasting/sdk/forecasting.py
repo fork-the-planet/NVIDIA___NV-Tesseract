@@ -20,12 +20,12 @@ except ImportError:
     HF_HUB_AVAILABLE = False
 
 # Clean absolute imports - package is installed in editable mode
+from backbone.utils.utils import control_randomness
 from dataset_longhorizon import (
     CSVLongHorizonSimpleDataset,
     Standardizer,
 )
 from model import build_model
-from momentfm.utils.utils import control_randomness
 
 # Define DEVICE here to avoid import complexity
 
@@ -40,11 +40,13 @@ def _has_mps():
 DEVICE = (
     torch.device("cuda") if torch.cuda.is_available() else torch.device("mps") if _has_mps() else torch.device("cpu")
 )
+DEFAULT_CHECKPOINT_NAME = "moment_head_512_6hr.pt"
+DEFAULT_BACKBONE_NAME = "AutonLab/MOMENT-1-large"
 
 
 def download_model_weights(
     standardizer_pkl: str = "standardizer.pkl",
-    ckpt: str = "moment_head_512_6hr.pt",
+    ckpt: str = DEFAULT_CHECKPOINT_NAME,
     repo_id: str = "nvidia/nv-tesseract-forecasting",
     force_download: bool = False,
 ) -> tuple[str, str]:
@@ -417,7 +419,7 @@ def perform_forecasting(
     context_df: pd.DataFrame | None = None,  # Optional context DataFrame for DARR mode
     # Model configuration - Replace with your own paths for the weights and standardizer
     standardizer_pkl: str = "standardizer.pkl",
-    ckpt: str = "moment_head_512_6hr.pt",
+    ckpt: str = DEFAULT_CHECKPOINT_NAME,
     seq_len: int = 512,
     forecast_horizon: int = 72,
     model_horizon: int = 72,  # Override with other weights' values if needed
@@ -426,7 +428,7 @@ def perform_forecasting(
     # DARR mode configuration
     alpha: float = 0.01,
     # Additional parameters (with sensible defaults)
-    model_name: str = "AutonLab/MOMENT-1-large",
+    model_name: str = DEFAULT_BACKBONE_NAME,
     batch_size: int = 8,
     num_workers: int = 2,
     stride: int | None = None,

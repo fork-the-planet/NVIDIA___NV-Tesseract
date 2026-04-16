@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from forecasting import perform_forecasting
+from sdk.forecasting import perform_forecasting
 
 # Load your CSV file
 csv_path = (
@@ -51,9 +51,6 @@ if __name__ == "__main__":
         timestamp_column=timestamp_col,
         target_column=target_col,
         save_preds="forecast_ETTh_seq_len_100.csv",
-        # Optional: specify custom paths
-        # ckpt="artifacts_512_72/moment_head_512_6hr.pt",
-        # standardizer_pkl="artifacts_512_72/standardizer.pkl",
     )
     print(f"\nStandard forecast (only predicted rows with '{target_col}_forecast' column):")
     print(forecast_df.to_csv())
