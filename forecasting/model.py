@@ -22,6 +22,9 @@ def build_model(
     freeze_encoder: bool = True,
     freeze_embedder: bool = True,
     freeze_head: bool = False,
+    use_cross_channel: bool = False,
+    cross_channel_heads: int = 8,
+    cross_channel_dropout: float = 0.1,
     local_files_only: bool = False,
     device: str | None = None,
 ) -> torch.nn.Module:
@@ -39,6 +42,9 @@ def build_model(
             "freeze_encoder": freeze_encoder,
             "freeze_embedder": freeze_embedder,
             "freeze_head": freeze_head,
+            "use_cross_channel": use_cross_channel,
+            "cross_channel_heads": cross_channel_heads,
+            "cross_channel_dropout": cross_channel_dropout,
         },
         local_files_only=local_files_only,
     )

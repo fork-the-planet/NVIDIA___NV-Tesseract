@@ -31,7 +31,10 @@ class DummyModel:
 
 @pytest.fixture(autouse=True)
 def patch_external_dependencies(monkeypatch):
+    build_calls = []
+
     def build_model(*, forecast_horizon, **kwargs):
+        build_calls.append({"forecast_horizon": forecast_horizon, **kwargs})
         return DummyModel(model_horizon=forecast_horizon)
 
     monkeypatch.setattr(forecasting, "build_model", build_model)
@@ -45,6 +48,9 @@ def patch_external_dependencies(monkeypatch):
         },
     )
     monkeypatch.setattr(forecasting, "control_randomness", lambda seed=0: None)
+    forecasting.clear_model_cache()
+    yield build_calls
+    forecasting.clear_model_cache()
 
 
 def make_timeseries(num_rows: int = 10) -> pd.DataFrame:
@@ -92,6 +98,44 @@ def test_perform_forecasting_generates_forecast_when_horizon_exceeds_model_horiz
     assert "target_forecast" in result.columns
     assert len(result) == 3
     assert result["target_forecast"].tolist() == [1.0, 1.0, 1.0]
+
+
+def test_perform_forecasting_uses_cross_channel_model_by_default(patch_external_dependencies):
+    df = make_timeseries(num_rows=10)
+    forecasting.perform_forecasting(
+        df,
+        seq_len=5,
+        forecast_horizon=3,
+        model_horizon=2,
+        standardizer_pkl="fake_std.pkl",
+        ckpt="fake_ckpt.pt",
+    )
+
+    assert patch_external_dependencies
+    build_kwargs = patch_external_dependencies[0]
+    assert build_kwargs["use_cross_channel"] is True
+    assert build_kwargs["cross_channel_heads"] == 8
+    assert build_kwargs["cross_channel_dropout"] == 0.1
+
+
+def test_perform_forecasting_allows_cross_channel_configuration_override(patch_external_dependencies):
+    df = make_timeseries(num_rows=10)
+    forecasting.perform_forecasting(
+        df,
+        seq_len=5,
+        forecast_horizon=3,
+        model_horizon=2,
+        standardizer_pkl="fake_std.pkl",
+        ckpt="fake_ckpt.pt",
+        use_cross_channel=False,
+        cross_channel_heads=4,
+        cross_channel_dropout=0.25,
+    )
+
+    build_kwargs = patch_external_dependencies[0]
+    assert build_kwargs["use_cross_channel"] is False
+    assert build_kwargs["cross_channel_heads"] == 4
+    assert build_kwargs["cross_channel_dropout"] == 0.25
 
 
 def test_perform_forecasting_requires_timestamp_column():
