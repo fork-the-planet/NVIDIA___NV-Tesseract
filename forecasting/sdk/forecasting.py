@@ -40,6 +40,7 @@ DEVICE = (
     torch.device("cuda") if torch.cuda.is_available() else torch.device("mps") if _has_mps() else torch.device("cpu")
 )
 DEFAULT_CHECKPOINT_NAME = "moment_head_512_6hr.pt"
+DEFAULT_CROSS_CHANNEL_CHECKPOINT_NAME = "run8_best_model_cr.pt"
 DEFAULT_BACKBONE_NAME = "AutonLab/MOMENT-1-large"
 _MODEL_CACHE: dict[str, torch.nn.Module] = {}
 
@@ -630,6 +631,10 @@ def perform_forecasting(
 
     # Set random seed
     control_randomness(seed=seed)
+
+    # Select checkpoint based on cross-channel mode when using defaults
+    if ckpt == DEFAULT_CHECKPOINT_NAME and use_cross_channel:
+        ckpt = DEFAULT_CROSS_CHANNEL_CHECKPOINT_NAME
 
     # Auto-download model weights if they don't exist
     try:
