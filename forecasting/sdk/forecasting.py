@@ -1,7 +1,6 @@
+import hashlib
 import json
 import os
-
-# Import required modules from parent directory
 import tempfile
 from pathlib import Path
 
@@ -41,7 +40,110 @@ DEVICE = (
     torch.device("cuda") if torch.cuda.is_available() else torch.device("mps") if _has_mps() else torch.device("cpu")
 )
 DEFAULT_CHECKPOINT_NAME = "moment_head_512_6hr.pt"
+DEFAULT_CROSS_CHANNEL_CHECKPOINT_NAME = "run8_best_model_cr.pt"
 DEFAULT_BACKBONE_NAME = "AutonLab/MOMENT-1-large"
+_MODEL_CACHE: dict[str, torch.nn.Module] = {}
+
+
+def _load_standardizer_artifact(path: str) -> Standardizer:
+    artifact = joblib.load(path)
+    if isinstance(artifact, Standardizer):
+        return artifact
+    if isinstance(artifact, dict):
+        mean = np.array(artifact["mean"], dtype=np.float32)
+        std = np.array(artifact["std"], dtype=np.float32)
+        std[std < 1e-8] = 1.0
+        return Standardizer(mean=mean, std=std)
+    if hasattr(artifact, "mean") and hasattr(artifact, "std"):
+        mean = np.array(artifact.mean, dtype=np.float32)
+        std = np.array(artifact.std, dtype=np.float32)
+        std[std < 1e-8] = 1.0
+        return Standardizer(mean=mean, std=std)
+    raise TypeError(f"Unsupported standardizer artifact type: {type(artifact)!r}")
+
+
+def _get_model_cache_key(
+    model_name: str,
+    ckpt: str,
+    seq_len: int,
+    model_horizon: int,
+    device: str,
+    use_cross_channel: bool,
+    cross_channel_heads: int,
+    cross_channel_dropout: float,
+) -> str:
+    try:
+        ckpt_mtime = Path(ckpt).stat().st_mtime
+    except OSError:
+        ckpt_mtime = 0
+
+    cache_data = (
+        f"{model_name}_{ckpt}_{seq_len}_{model_horizon}_{device}_{ckpt_mtime}_"
+        f"{use_cross_channel}_{cross_channel_heads}_{cross_channel_dropout}"
+    )
+    return hashlib.md5(cache_data.encode()).hexdigest()
+
+
+def _load_cached_model(
+    model_name: str,
+    ckpt: str,
+    seq_len: int,
+    model_horizon: int,
+    device: torch.device,
+    local_files_only: bool = False,
+    use_cross_channel: bool = True,
+    cross_channel_heads: int = 8,
+    cross_channel_dropout: float = 0.1,
+):
+    cache_key = _get_model_cache_key(
+        model_name,
+        ckpt,
+        seq_len,
+        model_horizon,
+        str(device),
+        use_cross_channel,
+        cross_channel_heads,
+        cross_channel_dropout,
+    )
+
+    if cache_key in _MODEL_CACHE:
+        print(f"Using cached model for {ckpt}")
+        return _MODEL_CACHE[cache_key]
+
+    print(f"Loading model from checkpoint: {ckpt}")
+
+    model = build_model(
+        model_name=model_name,
+        seq_len=seq_len,
+        forecast_horizon=model_horizon,
+        freeze_encoder=False,
+        freeze_embedder=False,
+        freeze_head=False,
+        use_cross_channel=use_cross_channel,
+        cross_channel_heads=cross_channel_heads,
+        cross_channel_dropout=cross_channel_dropout,
+        local_files_only=local_files_only,
+        device=str(device),
+    )
+    state = torch.load(ckpt, map_location=device)
+    load_result = model.load_state_dict(state, strict=False)
+    missing = list(getattr(load_result, "missing_keys", [])) if load_result is not None else []
+    unexpected = list(getattr(load_result, "unexpected_keys", [])) if load_result is not None else []
+    if unexpected:
+        raise RuntimeError(f"Unexpected checkpoint keys for forecasting model: {unexpected}")
+    if missing:
+        non_cr_missing = [key for key in missing if "cross_channel" not in key]
+        if non_cr_missing:
+            raise RuntimeError(f"Missing non-cross-channel checkpoint keys: {non_cr_missing}")
+    model.eval()
+    _MODEL_CACHE[cache_key] = model
+    print(f"Model cached with key: {cache_key[:8]}...")
+    return model
+
+
+def clear_model_cache():
+    _MODEL_CACHE.clear()
+    print("Model cache cleared")
 
 
 def download_model_weights(
@@ -438,6 +540,9 @@ def perform_forecasting(
     temperature: float = 0.05,
     device: str | None = None,
     local_files_only: bool = False,
+    use_cross_channel: bool = True,
+    cross_channel_heads: int = 8,
+    cross_channel_dropout: float = 0.1,
 ) -> pd.DataFrame:
     """
     Perform time series forecasting using Tesseract v2 with optional context-enhanced mode (DARR).
@@ -526,6 +631,10 @@ def perform_forecasting(
 
     # Set random seed
     control_randomness(seed=seed)
+
+    # Select checkpoint based on cross-channel mode when using defaults
+    if ckpt == DEFAULT_CHECKPOINT_NAME and use_cross_channel:
+        ckpt = DEFAULT_CROSS_CHANNEL_CHECKPOINT_NAME
 
     # Auto-download model weights if they don't exist
     try:
@@ -643,11 +752,7 @@ def perform_forecasting(
             context_csv_path = temp_context_csv
 
         # Load standardizer
-        stds = joblib.load(standardizer_pkl)
-        mean = np.array(stds["mean"], dtype=np.float32)
-        std = np.array(stds["std"], dtype=np.float32)
-        std[std < 1e-8] = 1.0
-        standardizer = Standardizer(mean=mean, std=std)
+        standardizer = _load_standardizer_artifact(standardizer_pkl)
 
         # ALWAYS use InferenceOnlyDataset for the main test data
         test_dataset = InferenceOnlyDataset(csv_path=test_csv_path, seq_len=seq_len, standardizer=standardizer)
@@ -660,20 +765,17 @@ def perform_forecasting(
             pin_memory=True,
         )
 
-        # Build model with model_horizon
-        model = build_model(
+        model = _load_cached_model(
             model_name=model_name,
+            ckpt=ckpt,
             seq_len=seq_len,
-            forecast_horizon=model_horizon,  # Use model's native horizon
-            freeze_encoder=False,
-            freeze_embedder=False,
-            freeze_head=False,
+            model_horizon=model_horizon,
+            device=device,
             local_files_only=local_files_only,
-            device=str(device),
+            use_cross_channel=use_cross_channel,
+            cross_channel_heads=cross_channel_heads,
+            cross_channel_dropout=cross_channel_dropout,
         )
-        state = torch.load(ckpt, map_location=device)
-        model.load_state_dict(state, strict=False)
-        model.eval()
 
         # Perform inference based on mode
         if mode == "darr":
