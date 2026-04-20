@@ -1,0 +1,37 @@
+# Continuous integration: lint (Ruff) + forecasting unit tests.
+# Requires: uv (https://docs.astral.sh/uv/) — same as local Makefile.
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Lint (Ruff check + format)
+        run: make lint
+
+      - name: Install forecasting package and run tests
+        working-directory: forecasting
+        run: |
+          uv sync --group dev --frozen --python 3.12
+          uv run --python 3.12 pytest sdk/tests -q --tb=short
