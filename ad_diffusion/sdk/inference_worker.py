@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA Corporation
+# SPDX-License-Identifier: Apache-2.0
+
 """Worker script for multi-GPU inference.
 
 This script is designed to be called via subprocess with CUDA_VISIBLE_DEVICES
@@ -56,7 +59,7 @@ def main():
         from models.main_model import TSDiffuser_Generic
 
         # GPU logging is not available in this standalone package; provide a no-op fallback.
-        def configure_worker_logging(*args, **kwargs):
+        def configure_worker_logging(*args: object, **kwargs: object) -> None:
             pass
 
         from sdk.inference_ad import (

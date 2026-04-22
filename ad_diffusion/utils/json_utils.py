@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA Corporation
+# SPDX-License-Identifier: Apache-2.0
+
 """JSON serialization utilities for numpy arrays, DataFrames, and sklearn models.
 
 Replaces pickle for data serialization with JSON, preserving dtype,
@@ -12,7 +15,7 @@ import numpy as np
 import pandas as pd
 
 
-def _serialize_numpy_for_json(obj):  # noqa: PLR0911
+def _serialize_numpy_for_json(obj):
     """Convert numpy arrays, dtypes, and scalars to JSON-serializable format."""
     if isinstance(obj, np.ndarray):
         return {

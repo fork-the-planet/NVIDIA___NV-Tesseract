@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA Corporation
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Quick Example: Anomaly Detection with AD Diffusion
 
@@ -158,10 +161,10 @@ def save_sample_dataset():
 
 
 def run_anomaly_detection_example(
-    model_path: str = None,
-    config_path: str = None,
+    model_path: str | None = None,
+    config_path: str | None = None,
     skip_download: bool = False,
-    dataset_path: str = None,
+    dataset_path: str | None = None,
 ):
     """
     Run the complete anomaly detection example.
@@ -217,7 +220,7 @@ def run_anomaly_detection_example(
                 logger.warning(f"Dataset not found at {dataset_path}, creating synthetic dataset instead")
             else:
                 logger.info("No dataset provided, creating synthetic dataset...")
-            
+
             sample_dataset_path, labels_path = save_sample_dataset()
             df = pd.read_csv(sample_dataset_path)
 
@@ -298,14 +301,18 @@ def run_anomaly_detection_example(
                                 if (true_positives + false_negatives) > 0
                                 else 0
                             )
-                            f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+                            f1_score = (
+                                2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+                            )
 
                             logger.info("Evaluation Metrics (vs Ground Truth):")
                             logger.info(f"  Precision: {precision:.3f}")
                             logger.info(f"  Recall:    {recall:.3f}")
                             logger.info(f"  F1-Score:  {f1_score:.3f}")
                         else:
-                            logger.warning(f"Ground truth length ({len(labels_df)}) doesn't match results ({len(results)})")
+                            logger.warning(
+                                f"Ground truth length ({len(labels_df)}) doesn't match results ({len(results)})"
+                            )
 
                     except Exception as e:
                         logger.warning(f"Could not evaluate against ground truth: {e}")
@@ -323,7 +330,9 @@ def run_anomaly_detection_example(
             except Exception as e:
                 logger.error(f"Anomaly detection failed: {e}")
                 logger.info("This might be due to missing model file or incompatible data size.")
-                logger.info("Please ensure you have a trained NV-Tesseract AD diffusion model and sufficient data samples.")
+                logger.info(
+                    "Please ensure you have a trained NV-Tesseract AD diffusion model and sufficient data samples."
+                )
 
         else:
             logger.warning("No model weights found locally and auto-download was skipped/failed.")

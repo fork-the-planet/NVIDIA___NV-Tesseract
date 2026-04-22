@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA Corporation
+# SPDX-License-Identifier: Apache-2.0
+
 from __future__ import annotations
 
 import logging
@@ -52,13 +55,23 @@ def perform_anomaly_analysis_with_diffusion(
     # The diffusion model expects all numeric columns
     input_df = df.copy()
 
-    # Validate all columns are numeric
+    # Validate all columns are numeric by attempting to convert the entire DataFrame
+    original_columns = input_df.columns.tolist()
+
+    # Try to convert all columns to numeric at once
+    numeric_df = input_df.apply(pd.to_numeric, errors="coerce")
+
+    # Check which columns introduced NaNs (indicating non-numeric values)
     non_numeric_cols = []
-    for col in input_df.columns:
-        try:
-            input_df[col] = pd.to_numeric(input_df[col], errors="raise")
-        except (ValueError, TypeError):
+    for col in original_columns:
+        original_na_count = input_df[col].isna().sum()
+        converted_na_count = numeric_df[col].isna().sum()
+
+        if converted_na_count > original_na_count:
             non_numeric_cols.append(col)
+        else:
+            # Update the original dataframe with successfully converted column
+            input_df[col] = numeric_df[col]
 
     if non_numeric_cols:
         raise ValueError(

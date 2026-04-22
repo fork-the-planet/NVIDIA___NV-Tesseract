@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA Corporation
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Adaptive Thresholding Methods for Time Series Anomaly Detection
 
