@@ -1,22 +1,29 @@
 # NV-Tesseract
 
-NVIDIA Tesseract is an open-source time series analysis library covering forecasting, anomaly detection, and classification. The forecasting module builds on a pretrained transformer backbone; anomaly detection and classification are powered by NVIDIA's own proprietary algorithms.
+NVIDIA Tesseract is an open-source time series analysis library covering forecasting and anomaly detection. The forecasting module builds on a pretrained transformer backbone; anomaly detection uses diffusion-based models powered by NVIDIA's proprietary algorithms.
 
 ## Overview
 
-- **Forecasting**: DataFrame-first API for long-horizon time series forecasting with DARR (context-enhanced) mode, built on a vendored backbone.
-- **Anomaly Detection** *(coming soon)*: Diffusion-based multivariate and transformer-based univariate anomaly detection using novel proprietary algorithms.
-- **Classification** *(coming soon)*: Transformer-based tabular data classification using novel proprietary algorithms.
+- **Forecasting**: DataFrame-first API for multivariate time series forecasting with DARR (context-enhanced) mode, built on a vendored backbone.
+- **Anomaly Detection**: Diffusion-based multivariate anomaly detection using novel proprietary algorithms.
 
 ## Getting Started
 
 ### Installation
 
-Clone the repo and install the forecasting package (includes PyTorch, Hugging Face Hub, and the vendored backbone dependencies):
+Clone the repo and install the desired package:
 
+#### Forecasting
 ```bash
 git clone https://github.com/NVIDIA/NV-Tesseract.git
 cd NV-Tesseract/forecasting
+uv sync --python 3.12   # or: pip install -e .
+```
+
+#### Anomaly Detection
+```bash
+git clone https://github.com/NVIDIA/NV-Tesseract.git
+cd NV-Tesseract/ad_diffusion
 uv sync --python 3.12   # or: pip install -e .
 ```
 
@@ -24,6 +31,7 @@ Use the same interpreter/venv when you run the examples below.
 
 ### Quick Start
 
+#### Forecasting
 ```python
 from sdk.forecasting import perform_forecasting
 import pandas as pd
@@ -43,7 +51,22 @@ forecasts = perform_forecasting(
 # Returns a DataFrame with `target_forecast` column containing 72 predictions
 ```
 
-### DARR (Context-Enhanced) Inference
+#### Anomaly Detection
+```python
+from sdk.anomaly_analysis import perform_anomaly_analysis_with_diffusion
+import pandas as pd
+
+df = pd.read_csv("your_timeseries_data.csv")
+
+results = perform_anomaly_analysis_with_diffusion(
+    df=df,
+    threshold_strategy="scs",  # or "macs"
+    nsample=15,
+)
+# Returns DataFrame with anomaly scores and binary anomaly flags
+```
+
+### DARR (Context-Enhanced) Forecasting
 
 ```python
 darr_result = perform_forecasting(
@@ -59,42 +82,55 @@ darr_result = perform_forecasting(
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.12+
 - PyTorch 2.0+
 - pandas, numpy
-- Pretrained transformer backbone weights
+- Pretrained model weights (auto-downloaded from Hugging Face)
 - GPU recommended (CUDA or Apple MPS); falls back to CPU automatically
 
 ## Usage
 
-See [`forecasting/sdk/README.md`](forecasting/sdk/README.md) for full API reference, parameter descriptions, output format, and error handling details.
+### Forecasting
+- See [`forecasting/README.md`](forecasting/README.md) for full API reference and examples
+- Run [`forecasting/sdk/quick_example.py`](forecasting/sdk/quick_example.py) for an end-to-end example
 
-See [`forecasting/sdk/quick_example.py`](forecasting/sdk/quick_example.py) for an end-to-end runnable script.
+### Anomaly Detection
+- See [`ad_diffusion/README.md`](ad_diffusion/README.md) for detailed usage and configuration
+- Run [`ad_diffusion/examples/quick_example.py`](ad_diffusion/examples/quick_example.py) for an end-to-end example with synthetic or custom datasets
 
 ## Capabilities
 
 | Module | Status | Description |
 |--------|--------|-------------|
-| `forecasting/` | Available | Time series forecasting with DARR mode |
-| `ad_diffusion/` | Coming soon | Diffusion-based multivariate anomaly detection |
-| `ad_transformer/` | Coming soon | Transformer-based univariate anomaly detection & classification |
+| `forecasting/` | ✅ Available | Time series forecasting with DARR (context-enhanced) mode |
+| `ad_diffusion/` | ✅ Available | Diffusion-based multivariate anomaly detection with adaptive thresholding |
 
 ## Repository Structure
 
 ```
 NV-Tesseract/
-├── forecasting/                 # Forecasting module (available)
-│   ├── __init__.py              # Exports perform_forecasting, DEVICE
+├── forecasting/                 # Time series forecasting
+│   ├── pyproject.toml           # Project configuration  
+│   ├── README.md                # Forecasting documentation
 │   ├── model.py                 # Model construction utilities
 │   ├── dataset_longhorizon.py   # Dataset classes for long-horizon forecasting
 │   └── sdk/
 │       ├── forecasting.py       # Core perform_forecasting() implementation
 │       ├── quick_example.py     # End-to-end usage example
-│       ├── README.md            # Full SDK API reference
-│       └── tests/
-│           └── datasets/        # Sample datasets for testing
-├── ad_diffusion/                # Multivariate anomaly detection (coming soon)
-└── ad_transformer/              # Univariate anomaly detection & classification (coming soon)
+│       └── tests/               # Test datasets and examples
+├── ad_diffusion/                # Multivariate anomaly detection
+│   ├── pyproject.toml           # Project configuration
+│   ├── README.md                # AD diffusion documentation  
+│   ├── sdk/                     # Main inference functions
+│   │   ├── anomaly_analysis.py  # Main API function
+│   │   ├── inference_ad.py      # Core diffusion inference
+│   │   └── thresholds.py        # SCS/MACS adaptive thresholding
+│   ├── models/                  # Diffusion model implementations
+│   ├── utils/                   # Preprocessing and utilities
+│   └── examples/                # Usage examples and datasets
+│       ├── quick_example.py     # Complete example (synthetic + custom data)
+│       └── datasets/            # Sample datasets and documentation
+└── Makefile                     # Linting and formatting commands
 ```
 
 ## Contribution Guidelines

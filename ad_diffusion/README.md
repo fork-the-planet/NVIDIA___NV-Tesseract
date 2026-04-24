@@ -2,8 +2,6 @@
 
 A package for anomaly detection using NV-Tesseract diffusion models.
 
-**Requirements**: Python 3.12+ | Modern dependencies | GPU support optional
-
 ## Features
 
 - **Diffusion-based Anomaly Detection**: Uses advanced diffusion models for robust anomaly detection
@@ -303,18 +301,6 @@ source .venv/bin/activate  # On Linux/macOS
 python examples/quick_example.py
 ```
 
-## Testing
-
-```bash
-# Run all tests
-uv run pytest
-
-# Run with coverage
-uv run pytest --cov=ad_diffusion
-
-# Run specific test
-uv run pytest tests/test_inference.py -v
-```
 
 ## Performance Notes
 
@@ -376,38 +362,3 @@ If you encounter dependency conflicts:
 uv cache clean
 uv sync --reinstall
 ```
-
-## Useful uv Commands
-
-```bash
-# Install new dependency
-uv add package-name
-
-# Install development dependency
-uv add --group dev package-name
-
-# Update all dependencies
-uv sync --upgrade
-
-# Run with specific Python version
-uv run --python 3.12 python script.py
-
-# Show dependency tree
-uv tree
-
-# Export requirements
-uv export > requirements.txt
-```
-
-## Contributing
-
-This is a research-oriented package. For contributions:
-
-1. Follow the existing code organization (sdk/, models/, utils/, examples/)
-2. Maintain compatibility with the flat import structure
-3. Add path setup in new files: `sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))`
-4. Update documentation and examples as needed
-
-## License
-
-This package maintains the same license as the NV-Tesseract project.

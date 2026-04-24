@@ -1,6 +1,6 @@
-# Tesseract v2 Forecasting SDK
+# Tesseract Forecasting SDK
 
-Programmatic entry point for running `perform_forecasting()` on pandas DataFrames without invoking the CLI. Supports autoregressive forecasting beyond the base model horizon and context-enhanced (DARR) predictions.
+Programmatic entry point for running `perform_forecasting()` on pandas DataFrames. Supports multivariate forecasting and context-enhanced (DARR) predictions.
 
 ## Features
 
