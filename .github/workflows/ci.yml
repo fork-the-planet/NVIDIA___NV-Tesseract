@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
 # Continuous integration: lint (Ruff) + forecasting unit tests.
 # Requires: uv (https://docs.astral.sh/uv/) — same as local Makefile.
 
@@ -29,6 +32,9 @@ jobs:
 
       - name: Lint (Ruff check + format)
         run: make lint
+
+      - name: Check SPDX headers on Python sources
+        run: make spdx-check
 
       - name: Install forecasting package and run tests
         working-directory: forecasting
