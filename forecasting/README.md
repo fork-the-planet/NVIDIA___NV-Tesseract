@@ -247,6 +247,3 @@ Make sure to run Python through UV to use the project environment:
 uv run python your_script.py
 ```
 
-## License
-
-[Add your license information here]
