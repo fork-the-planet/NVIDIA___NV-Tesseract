@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA Corporation
+# SPDX-License-Identifier: Apache-2.0
+
 """Insert SPDX short-form tags into Python files.
 
 Follows SPDX v2.3 guidance for embedded metadata in source files:

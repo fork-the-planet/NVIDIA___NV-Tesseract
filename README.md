@@ -109,6 +109,7 @@ darr_result = perform_forecasting(
 
 ```
 NV-Tesseract/
+├── third_party/                 # Upstream LICENSE files for vendored/in-tree third-party code
 ├── forecasting/                 # Time series forecasting
 │   ├── pyproject.toml           # Project configuration  
 │   ├── README.md                # Forecasting documentation
@@ -135,8 +136,21 @@ NV-Tesseract/
 
 ## Contribution Guidelines
 
-- Start here: `CONTRIBUTING.md`
-- Code of Conduct: `CODE_OF_CONDUCT.md`
+- Start here: [`CONTRIBUTING.md`](CONTRIBUTING.md) — includes Developer Certificate of Origin (`Signed-off-by`) and IP-review expectations for NVIDIA contributors.
+- Code of Conduct: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
+
+## Legal and open source notices
+
+These paths support NVIDIA OSRB / release checklist items:
+
+| Item | Location in this repo |
+|------|------------------------|
+| Apache License 2.0 (project) | [`LICENSE`](LICENSE) |
+| Third-party and dependency notices | [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md); upstream license **files** for included source under [`third_party/`](third_party/) |
+| Per-file SPDX / copyright headers | Python sources under `forecasting/`, `ad_diffusion/`, `scripts/` (see [`CONTRIBUTING.md`](CONTRIBUTING.md)) |
+| Developer Certificate of Origin (DCO) | [`CONTRIBUTING.md`](CONTRIBUTING.md#developer-certificate-of-origin) — canonical text: [developercertificate.org](https://developercertificate.org/) |
+
+**VP approval** for a given release is recorded in your internal OSRB bug / workflow; it is not stored in this repository.
 
 ## Security
 
@@ -149,7 +163,7 @@ NV-Tesseract/
 
 ## License
 
-This project is licensed under the Apache 2.0 License — see the `LICENSE` file for details.
+This project is licensed under the Apache License, Version 2.0 — see [`LICENSE`](LICENSE). Third-party and dependency information is in [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
 
 ## Blogs
 

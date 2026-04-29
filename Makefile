@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA Corporation
+# SPDX-License-Identifier: Apache-2.0
+
 .DEFAULT_GOAL := help
 
 # Ruff config and roots (keep Ruff spec in sync with [dependency-groups] dev in forecasting/pyproject.toml)
