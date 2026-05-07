@@ -9,6 +9,7 @@ This example demonstrates:
 1. Auto-downloading model weights from Hugging Face (on first run)
 2. Standard forecasting mode
 3. DARR mode (context-enhanced forecasting)
+4. Interpretability mode (lag x horizon attributions, JSON + PDF report)
 
 Make sure you're authenticated with Hugging Face for the private repo:
     huggingface-cli login
@@ -58,23 +59,49 @@ if __name__ == "__main__":
     print(f"\nStandard forecast (only predicted rows with '{target_col}_forecast' column):")
     print(forecast_df.to_csv())
 
-    # DARR mode requires a user-provided context dataset that mirrors the input schema
-    # but contains different data (e.g., historical slices, previously predicted values, etc.).
-    # This example loads one such CSV to demonstrate how to run DARR.
-    context_csv_path = Path(__file__).resolve().parent / "tests" / "datasets" / "ETTh_single_feature_darr_context.csv"
-    if not context_csv_path.exists():
-        raise SystemExit(f"Context CSV not found at {context_csv_path}, please provide your own for DARR mode.")
+    # # DARR mode requires a user-provided context dataset that mirrors the input schema
+    # # but contains different data (e.g., historical slices, previously predicted values, etc.).
+    # # This example loads one such CSV to demonstrate how to run DARR.
+    # context_csv_path = Path(__file__).resolve().parent / "tests" / "datasets" / "ETTh_single_feature_darr_context.csv"
+    # if not context_csv_path.exists():
+    #     raise SystemExit(f"Context CSV not found at {context_csv_path}, please provide your own for DARR mode.")
 
-    context_df = pd.read_csv(context_csv_path)
-    darr_df = perform_forecasting(
+    # context_df = pd.read_csv(context_csv_path)
+    # darr_df = perform_forecasting(
+    #     df=df,
+    #     seq_len=seq_len,
+    #     forecast_horizon=forecast_horizon,
+    #     context_df=context_df,  # This enables DARR mode
+    #     timestamp_column=timestamp_col,
+    #     target_column=target_col,
+    #     save_preds="forecast_ETTh_darr_100.csv",
+    #     # Model weights auto-downloaded if needed
+    # )
+    # print(f"\nDARR forecast (hybrid prediction in '{target_col}_forecast' column):")
+    # print(darr_df.to_csv())
+
+    # Interpretability mode: produces a lag x horizon attribution heatmap and a
+    # multi-page PDF report alongside the forecast. Set ``interpretability=True``
+    # and choose the output format via ``interpretability_output``:
+    #   - "json" -> writes only forecast.csv + explanation.json
+    #   - "pdf"  -> writes forecast.csv + lag_horizon_*.csv/png + explanation_report.pdf
+    #   - None   -> writes both (full bundle)
+    interp_out_dir = Path(__file__).resolve().parent / "interpretability_output"
+    interp_df = perform_forecasting(
         df=df,
         seq_len=seq_len,
         forecast_horizon=forecast_horizon,
-        context_df=context_df,  # This enables DARR mode
         timestamp_column=timestamp_col,
         target_column=target_col,
-        save_preds="forecast_ETTh_darr_100.csv",
-        # Model weights auto-downloaded if needed
+        # Interpretability controls
+        interpretability=True,
+        interpretability_output=None,  # write both JSON and PDF
+        interpretability_out_dir=interp_out_dir,
+        interpretability_dataset_name=csv_path.name,
+        n_lags=128,
+        softmax_tau=1.0,
+        save_preds="forecast_ETTh_with_explanations.csv",
     )
-    print(f"\nDARR forecast (hybrid prediction in '{target_col}_forecast' column):")
-    print(darr_df.to_csv())
+    print(f"\nInterpretability forecast (single-window baseline in '{target_col}_forecast' column):")
+    print(interp_df.head().to_string(index=False))
+    print(f"\nReport bundle written under: {interp_out_dir}")

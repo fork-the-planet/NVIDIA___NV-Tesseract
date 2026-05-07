@@ -103,6 +103,7 @@ forecasting/
 │   ├── quick_example.py  # Example usage script
 │   └── tests/            # Test files and datasets
 ├── dataset_longhorizon.py # Dataset utilities
+├── interpretability.py   # Model-agnostic explanation engine (lag x horizon)
 ├── model.py              # Model building utilities
 ├── standardizer.pkl      # Normalization params (auto-downloaded on first use)
 └── moment_head_512_6hr.pt  # Head checkpoint (auto-downloaded on first use)
@@ -126,6 +127,7 @@ forecasting/
 
 ### Optional Dependencies
 - `mac-mps` group: Optimized PyTorch for Apple Silicon
+- `matplotlib` - Required only for the interpretability PDF report and heatmap PNG; JSON-only interpretability output works without it
 
 ### Note on Dependencies
 - `backbone.py` is vendored directly in this package, so forecasting no longer depends on the external backbone package
@@ -145,7 +147,28 @@ The forecasting model requires pre-trained weights from the Hugging Face reposit
 - Repository: `nvidia/nv-tesseract-forecasting`
 - Required files (auto-downloaded to current directory):
   - `standardizer.pkl` - Data normalization parameters
-  - `moment_head_512_6hr.pt` - Model checkpoint for 6-hour forecasting
+  - `moment_head_512_6hr.pt` - Model checkpoint for standard 6-hour forecasting (standard forecasting only)
+  - `run8_best_model_cr.pt` - Model checkpoint for cross-channel forecasting (cross-channel forecasting only)
+
+## Interpretability
+
+Modern deep-learning forecasters predict but don't explain — they can't answer questions like *"Why did the model predict a spike tomorrow at 3pm?"* or *"Is it relying on a real pattern, or on noise?"*. Traditional tools like LIME and SHAP fall short for time-series because they destroy temporal continuity, lack forecast-horizon resolution, and cannot operate inside the latent space modern forecasters use.
+
+NV-Tesseract ships a **Model Agnostic Interpretability Framework** that produces localized, horizon-specific, time-aware explanations without modifying the underlying forecaster. It targets real-world deployments — finance risk, energy grids, manufacturing — where a black-box prediction is not enough.
+
+### The Lag–Horizon Attribution Engine
+
+The framework's core component is the **Lag–Horizon Attribution Engine**, which turns the computed semantic flow (the step-by-step transformation of the model's internal state in latent space) into influence scores. Its output is the **Lag–Horizon Attribution Matrix** `F`:
+
+- **Rows** are the lag `j` — how far back in the past an input occurred (e.g. 24 steps ago).
+- **Columns** are the forecast horizon `h` — how far ahead the model is predicting (e.g. step +1, step +48).
+- **Value** `F(j, h)` quantifies *how much the input at time `t − j` influenced the forecast at time `t + h`* — the horizon-specific, lag-specific attribution that flat-aggregate tools cannot provide.
+
+Internally `F` is computed by composing the model's consecutive flow operators along the latent path from each past input to each future prediction; per horizon, the scores are softmax-normalized into attributions.
+
+### What the SDK gives you
+
+When you call `perform_forecasting(..., interpretability=True)` the SDK runs the same loaded model on the trailing window and writes a self-contained explanation bundle: the K×H matrix as wide and long CSVs, a heatmap PNG, a full `explanation.json` (latent trajectory, semantic-flow magnitudes, and diagnostic ratios that flag whether the forecast segment is volatile relative to history), and a multi-page PDF report. See the **Interpretability (Lag x Horizon Explanations)** example below for the call shape and `sdk/README.md` for the full parameter reference and on-disk artifact catalogue.
 
 ## Usage Examples
 
@@ -185,6 +208,30 @@ results = perform_forecasting(
     timestamp_column="timestamp",
     target_column="target"
 )
+```
+
+### Interpretability (Lag x Horizon Explanations)
+```python
+from sdk.forecasting import perform_forecasting
+
+# Set interpretability=True to also produce an explanation bundle on disk.
+# `interpretability_output` selects what to materialize:
+#   - "json" -> forecast.csv + explanation.json
+#   - "pdf"  -> forecast.csv + lag_horizon_*.csv/png + explanation_report.pdf
+#   - None   -> both bundles
+results = perform_forecasting(
+    df=df,
+    forecast_horizon=72,
+    timestamp_column="timestamp",
+    target_column="target",
+    interpretability=True,
+    interpretability_output=None,                 # write both JSON and PDF
+    interpretability_out_dir="interpretability_output",
+    interpretability_dataset_name="my_dataset.csv",
+    n_lags=128,
+    softmax_tau=1.0,
+)
+# Bundle is written under <interpretability_out_dir>/run_<UTC-timestamp>/
 ```
 
 ### Manual Weight Paths (Optional)
@@ -245,5 +292,11 @@ If you see stale environment errors referring to an old backbone package:
 Make sure to run Python through UV to use the project environment:
 ```bash
 uv run python your_script.py
+```
+
+### Interpretability PDF / Heatmap Skipped
+If you see `Interpretability PDF report skipped: matplotlib is not installed.`, install matplotlib (or pick `interpretability_output="json"`):
+```bash
+uv add matplotlib
 ```
 
