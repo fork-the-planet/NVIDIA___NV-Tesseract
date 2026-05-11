@@ -28,7 +28,7 @@ Third-party notices and PyPI dependency summaries are in [`THIRD_PARTY_LICENSES.
 
 ### Source file headers
 
-- **NVIDIA-authored** Python files use SPDX short-form tags (`SPDX-FileCopyrightText`, `SPDX-License-Identifier`) per SPDX Specification v2.3, Annex E. Use the copyright attribution **`Copyright (c) <year> NVIDIA CORPORATION & AFFILIATES.`** (see [`scripts/add_spdx_headers.py`](scripts/add_spdx_headers.py) for the shared template).
+- **NVIDIA-authored** Python files use SPDX short-form tags (`SPDX-FileCopyrightText`, `SPDX-License-Identifier`) per SPDX Specification v2.3, Annex E. Use the copyright attribution **`Copyright (c) <year> NVIDIA CORPORATION & AFFILIATES. All rights reserved.`** (see [`scripts/add_spdx_headers.py`](scripts/add_spdx_headers.py) for the shared template).
 - Files that include third-party or modified third-party code must retain **upstream copyright and license notices** in the file (SPDX alone is not a substitute where upstream terms require full notice).
 
 You can refresh SPDX headers on Python trees with:
