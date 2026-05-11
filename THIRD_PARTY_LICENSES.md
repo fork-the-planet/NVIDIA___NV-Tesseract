@@ -8,6 +8,8 @@ NV-Tesseract source code authored by NVIDIA is offered under the Apache License,
 
 - **[`LICENSE`](LICENSE)**
 
+Redistribution notices under Apache 2.0 §4(d) are in **[`NOTICE`](NOTICE)**. The **MIT license** for included DPM-Solver material appears both in [`LICENSE`](LICENSE) (**ADDITIONAL THIRD-PARTY LICENSES**) and in [`third_party/dpm-solver/LICENSE`](third_party/dpm-solver/LICENSE).
+
 ## Per-file notices
 
 Python modules use SPDX license tags (`SPDX-License-Identifier`) and NVIDIA copyright lines where applicable, consistent with SPDX Specification v2.3, Annex E (short identifiers in source files). Files that incorporate or modify third-party source include the upstream copyright and license notice in addition to NVIDIA attribution — for example [`ad_diffusion/utils/dpm_solver_pytorch.py`](ad_diffusion/utils/dpm_solver_pytorch.py).

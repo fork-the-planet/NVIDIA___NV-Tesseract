@@ -146,6 +146,8 @@ These paths support NVIDIA OSRB / release checklist items:
 | Item | Location in this repo |
 |------|------------------------|
 | Apache License 2.0 (project) | [`LICENSE`](LICENSE) |
+| NOTICE (Apache 2.0 §4(d) attributions) | [`NOTICE`](NOTICE) |
+| Third-party MIT (DPM-Solver) in LICENSE | [`LICENSE`](LICENSE) — section **ADDITIONAL THIRD-PARTY LICENSES** |
 | Third-party and dependency notices | [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md); upstream license **files** for included source under [`third_party/`](third_party/) |
 | Per-file SPDX / copyright headers | Python sources under `forecasting/`, `ad_diffusion/`, `scripts/` (see [`CONTRIBUTING.md`](CONTRIBUTING.md)) |
 | Developer Certificate of Origin (DCO) | [`CONTRIBUTING.md`](CONTRIBUTING.md#developer-certificate-of-origin) — canonical text: [developercertificate.org](https://developercertificate.org/) |
@@ -163,7 +165,7 @@ These paths support NVIDIA OSRB / release checklist items:
 
 ## License
 
-This project is licensed under the Apache License, Version 2.0 — see [`LICENSE`](LICENSE). Third-party and dependency information is in [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
+This project is licensed under the Apache License, Version 2.0 — see [`LICENSE`](LICENSE). Third-party attribution required on distribution is summarized in [`NOTICE`](NOTICE); dependency summaries are in [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
 
 ## Blogs
 

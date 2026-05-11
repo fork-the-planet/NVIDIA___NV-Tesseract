@@ -1,7 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2022 Cheng Lu
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA Corporation
 #
-# This file is derived from DPM-Solver (PyTorch implementation):
+# This file incorporates code derived from DPM-Solver (PyTorch implementation):
 #   https://github.com/LuChengTHU/dpm-solver/blob/main/dpm_solver_pytorch.py
 #
 # A verbatim copy of the upstream MIT license is also kept at:
@@ -29,9 +28,15 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# Modifications by NVIDIA Corporation are contributed as part of the NV-Tesseract
-# project under the Apache License, Version 2.0; see the LICENSE file at the
-# repository root.
+# -----------------------------------------------------------------------------
+# NVIDIA modifications to this file:
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Modifications by NVIDIA CORPORATION & AFFILIATES are licensed under the Apache
+# License, Version 2.0. See the LICENSE file at the repository root for the full
+# license text.
+# -----------------------------------------------------------------------------
 
 import torch
 
