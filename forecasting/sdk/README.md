@@ -1,6 +1,6 @@
 # Tesseract Forecasting SDK
 
-Programmatic entry point for running `perform_forecasting()` on pandas DataFrames. Supports multivariate forecasting and context-enhanced (DARR) predictions.
+Programmatic entry point for running `perform_forecasting()` on pandas DataFrames. Supports multivariate forecasting, context-enhanced (DARR) predictions, and model-agnostic interpretability with horizon-specific lag attributions.
 
 ## Features
 
@@ -10,6 +10,7 @@ Programmatic entry point for running `perform_forecasting()` on pandas DataFrame
 - **Robust preprocessing**: Converts timestamps, fills numeric NULLs with zeros, enforces minimum sequence length (`seq_len`), and standardizes input using saved standardizer metadata.
 - **Column alignment**: Automatically handles datasets with different feature sets by aligning to common columns, preventing broadcasting errors.
 - **Diverse output**: Produces hybrid, direct, and kNN forecasts when context is provided; otherwise returns only the direct forecast column.
+- **Built-in interpretability**: Opt-in `interpretability=True` flag produces a horizon-resolved lag attribution matrix, supporting CSVs / heatmap PNG, an `explanation.json`, and a self-contained PDF report. Output format is selectable via `interpretability_output` (`"json"`, `"pdf"`, or `None` for both).
 
 ## Installation
 
@@ -103,6 +104,36 @@ result = perform_forecasting(df=df, context_df=context_df, ...)
 
 For this release, the blending weight `alpha` defaults to `0.01` and can be adjusted via the `alpha` parameter—the hybrid forecast uses that value to combine direct predictions with context-derived neighbors (`alpha * direct + (1 - alpha) * kNN`).
 
+### Interpretability inference
+
+Setting `interpretability=True` runs the loaded model on the trailing `seq_len` window and produces a horizon-resolved explanation alongside the forecast. The artifacts are written to a UTC-stamped subdirectory under `interpretability_out_dir`.
+
+```python
+from pathlib import Path
+
+interp_result = perform_forecasting(
+    df=df,
+    seq_len=512,
+    forecast_horizon=100,
+    interpretability=True,
+    interpretability_output=None,                 # "json", "pdf", or None for both
+    interpretability_out_dir=Path("interpretability_output"),
+    interpretability_dataset_name="my_dataset.csv",
+    n_lags=128,
+    softmax_tau=1.0,
+)
+```
+
+`interpretability_output` selects which artifacts are written:
+
+| Value | Files written under `<interpretability_out_dir>/run_<UTC>/` |
+|-------|-------------------------------------------------------------|
+| `"json"` | `forecast.csv`, `explanation.json` |
+| `"pdf"` | `forecast.csv`, `lag_horizon_attributions.csv`, `lag_horizon_long.csv`, `lag_horizon_heatmap.png`, `explanation_report.pdf` |
+| `None`  | All of the above |
+
+The returned DataFrame is the explanation-aligned forecast (single forward pass, so it lines up 1:1 with the attribution matrix). PDF / heatmap require `matplotlib`; if it's missing, those steps are skipped with a warning while JSON output continues to work.
+
 ## Function signature
 
 ```python
@@ -137,6 +168,16 @@ perform_forecasting(
     seed: int = 13,
     device: Optional[str] = None,
     local_files_only: bool = False,
+
+    # Interpretability
+    interpretability: bool = False,
+    interpretability_output: Optional[str] = None,            # "json" | "pdf" | None
+    interpretability_out_dir: Union[str, Path] = "interpretability_output",
+    interpretability_run_name: Optional[str] = None,
+    interpretability_top_k: int = 5,
+    interpretability_dataset_name: Optional[str] = None,
+    n_lags: int = 128,
+    softmax_tau: float = 1.0,
 ) -> pd.DataFrame
 ```
 
@@ -157,6 +198,14 @@ perform_forecasting(
 | `save_preds` | Optional CSV export location |
 | `device` | Override device selection (defaults to auto-detected CUDA/MPS/CPU) |
 | `local_files_only` | Load model from local cache without network access |
+| `interpretability` | Master switch. When `True`, the SDK skips the standard / DARR inference path and runs the interpretability explanation pipeline against the loaded model |
+| `interpretability_output` | `"json"` for explanation JSON only, `"pdf"` for the heatmap + PDF bundle, `None` for both. Invalid values raise `ValueError` |
+| `interpretability_out_dir` | Parent directory for the run subfolder; created if missing |
+| `interpretability_run_name` | Override the auto-stamped `run_<UTC>` folder name |
+| `interpretability_top_k` | How many top lag steps per horizon to render in the PDF table (default `5`) |
+| `interpretability_dataset_name` | Free-form label embedded in the JSON metadata and the PDF cover page |
+| `n_lags` | Number of past steps the lag-attribution matrix resolves (default `128`) |
+| `softmax_tau` | Temperature applied when softmaxing scores into per-horizon attribution |
 
 ## Preprocessing expectations
 
@@ -169,6 +218,7 @@ perform_forecasting(
 
 - **Standard mode**: `{target_column}_forecast` containing the requested `forecast_horizon` predictions with timestamps inferred from the input frequency.
 - **DARR mode**: Returns hybrid predictions in `{target_column}_forecast` (direct and kNN components are computed internally).
+- **Interpretability mode**: Returns the explanation-aligned forecast in `{target_column}_forecast` and writes the artifact bundle to `<interpretability_out_dir>/run_<UTC>/`.
 
 ### Output DataFrame structure
 
@@ -176,6 +226,21 @@ perform_forecasting(
 |--------|-------------|
 | `{timestamp_column}` | Forecasted timestamps starting after the last input timestamp |
 | `{target_column}_forecast` | Predicted values for the forecast horizon |
+
+### Interpretability artifact bundle
+
+When `interpretability=True`, the run directory contains the following files (selected by `interpretability_output`):
+
+| File | Written when | Contents |
+|------|--------------|----------|
+| `forecast.csv` | json, pdf, both | The returned forecast DataFrame |
+| `explanation.json` | json, both | Forecast + full explanation payload (baseline forecast, lag×horizon scores and attributions, latent trajectory, semantic-flow magnitudes, diagnostics, dataset metadata) |
+| `lag_horizon_attributions.csv` | pdf, both | Wide K×H attribution matrix |
+| `lag_horizon_long.csv` | pdf, both | Tidy `(lag, horizon, attribution[, score])` table |
+| `lag_horizon_heatmap.png` | pdf, both *(needs matplotlib)* | Visual heatmap, viridis cmap |
+| `explanation_report.pdf` | pdf, both *(needs matplotlib)* | Multi-page report: cover with metadata, forecast preview, lag×horizon heatmap, top-`interpretability_top_k` lag-step tables |
+
+The run directory path is printed on stdout when the call completes.
 
 ## Error handling
 
@@ -211,6 +276,8 @@ Warning: Column mismatch detected between input and context datasets
 | `ValueError: Context DataFrame has X rows but requires at least Y rows` | Context dataset too small | Context needs `seq_len + model_horizon` rows minimum |
 | `ValueError: forecast_horizon must be <= 512` | Forecast horizon too large | Reduce `forecast_horizon` or make multiple calls |
 | `ValueError: Target column 'X' not found in DataFrame` | Missing target column | Verify column name or use `target_column` parameter |
+| `ValueError: interpretability_output must be one of None, 'json', 'pdf'` | Bad value for the artifact selector | Use `None`, `"json"`, or `"pdf"` |
+| `Interpretability PDF report skipped: matplotlib is not installed.` | PDF/heatmap path attempted without matplotlib | `uv add matplotlib`, or set `interpretability_output="json"` |
 
 ### Data Validation
 

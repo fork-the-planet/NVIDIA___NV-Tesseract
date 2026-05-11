@@ -5,7 +5,9 @@ import hashlib
 import json
 import os
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import joblib
 import numpy as np
@@ -27,6 +29,7 @@ from dataset_longhorizon import (
     CSVLongHorizonSimpleDataset,
     Standardizer,
 )
+from interpretability import ForecastExplanation, explain_forecast
 from model import build_model
 
 # Define DEVICE here to avoid import complexity
@@ -516,6 +519,528 @@ def autoregressive_forecast(model, x_enc, input_mask, model_horizon, target_hori
     return final_preds.cpu().numpy()
 
 
+# ---------------------------------------------------------------------------
+# Interpretability helpers
+#
+# These helpers produce interpretability artifacts
+# (lag x horizon attribution heatmap, top-k lag tables, explanation JSON, and a self-contained PDF report)
+# directly from ``perform_forecasting`` when ``interpretability=True``.
+# ---------------------------------------------------------------------------
+
+
+def _save_lag_horizon_artifacts(
+    out_dir: Path,
+    attributions: np.ndarray,
+    scores: np.ndarray | None = None,
+    *,
+    na_rep: str = "nan",
+) -> Path | None:
+    """Write lag x horizon attribution CSVs and a heatmap PNG.
+
+    Returns the path to the heatmap PNG if matplotlib is available, else None.
+    """
+    K, H = attributions.shape
+
+    lag_cols = [f"horizon_{h}" for h in range(H)]
+    df_matrix = pd.DataFrame(attributions, columns=lag_cols)
+    df_matrix.insert(0, "lag", [f"lag_{j}" for j in range(K)])
+    df_matrix.to_csv(out_dir / "lag_horizon_attributions.csv", index=False, na_rep=na_rep)
+
+    rows = []
+    for j in range(K):
+        for h in range(H):
+            row = {"lag": j, "horizon": h, "attribution": float(attributions[j, h])}
+            if scores is not None:
+                row["score"] = float(scores[j, h])
+            rows.append(row)
+    pd.DataFrame(rows).to_csv(out_dir / "lag_horizon_long.csv", index=False, na_rep=na_rep)
+
+    try:
+        import matplotlib as mpl
+
+        mpl.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return None
+
+    fig, ax = plt.subplots(figsize=(max(8, H * 0.15), max(6, K * 0.05)))
+    im = ax.imshow(attributions, aspect="auto", cmap="viridis", interpolation="nearest")
+    ax.set_xlabel("Forecast horizon")
+    ax.set_ylabel("Lag (past time step)")
+    ax.set_xticks(np.linspace(0, H - 1, min(12, H), dtype=int))
+    ax.set_xticklabels(np.linspace(0, H - 1, min(12, H), dtype=int))
+    ax.set_yticks(np.linspace(0, K - 1, min(12, K), dtype=int))
+    ax.set_yticklabels(np.linspace(0, K - 1, min(12, K), dtype=int))
+    plt.colorbar(im, ax=ax, label="Attribution")
+    plt.tight_layout()
+    heatmap_path = out_dir / "lag_horizon_heatmap.png"
+    plt.savefig(heatmap_path, dpi=120)
+    plt.close(fig)
+    return heatmap_path
+
+
+def _topk_lag_steps_per_horizon(
+    scores: np.ndarray,
+    *,
+    top_k: int = 5,
+) -> tuple[np.ndarray | None, list[list[str]]]:
+    """Compute marginal per-step lag weights and produce top-k summary rows."""
+    if scores.ndim != 2 or scores.shape[0] < 2 or scores.shape[1] < 1:
+        return None, []
+    step_scores = np.vstack([scores[0:1, :], np.diff(scores, axis=0)])
+    step_scores = step_scores - np.max(step_scores, axis=0, keepdims=True)
+    step_probs = np.exp(step_scores)
+    step_probs = step_probs / np.maximum(np.sum(step_probs, axis=0, keepdims=True), 1e-12)
+
+    H = step_probs.shape[1]
+    rows: list[list[str]] = []
+    for h in range(H):
+        order = np.argsort(-step_probs[:, h])[:top_k]
+        row: list[str] = [f"horizon_{h}"]
+        for idx in order:
+            lag_step = int(idx) + 1
+            w = float(step_probs[idx, h])
+            row.append(str(lag_step))
+            row.append(f"{w:.4f}")
+        while len(row) < 1 + 2 * top_k:
+            row.extend(["", ""])
+        rows.append(row)
+    return step_probs, rows
+
+
+def _build_pdf_report(
+    pdf_path: Path,
+    *,
+    dataset_name: str | None = None,
+    forecast_df: pd.DataFrame,
+    explanation: ForecastExplanation,
+    target_column: str,
+    timestamp_column: str,
+    heatmap_path: Path | None,
+    topk_rows: list[list[str]],
+    top_k: int,
+) -> Path | None:
+    """Compose a multi-page PDF with the forecast and attribution heatmap."""
+    try:
+        import matplotlib as mpl
+
+        mpl.use("Agg")
+        import matplotlib.pyplot as plt
+        from matplotlib.backends.backend_pdf import PdfPages
+    except ImportError:
+        return None
+
+    attrib = np.asarray(explanation.lag_horizon_attributions)
+    K, H = attrib.shape
+
+    with PdfPages(pdf_path) as pdf:
+        fig = plt.figure(figsize=(8.5, 11))
+        fig.text(
+            0.5,
+            0.94,
+            "NV-Tesseract Forecasting Interpretability Report",
+            ha="center",
+            fontsize=18,
+            fontweight="bold",
+        )
+        fig.text(
+            0.5,
+            0.905,
+            datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+            ha="center",
+            fontsize=10,
+            color="gray",
+        )
+
+        summary = [
+            "Overview",
+            "--------",
+            f"Dataset: {dataset_name or ''}",
+            f"Target column: {target_column}",
+            f"Timestamp column: {timestamp_column}",
+            f"Forecast steps (H): {H}",
+            f"Lag context size (K): {K}",
+            "",
+            "What is in this report",
+            "----------------------",
+            "1. Forecast preview: Line chart of predicted target values",
+            "2. Lag x Horizon attribution heatmap: Shows how much each past step contributes to each forecast.",
+            "   a) Where lag=0 is the most recent input.",
+            "   b) Leveraging softmax-normalized weights, the heat map depicts which time steps are contributing the most to the forecast i.e. brighter colours highlight the relevant time steps.",
+            "3. Top-k lag steps per horizon (marginal contributions).",
+        ]
+        fig.text(0.08, 0.85, "\n".join(summary), ha="left", va="top", fontsize=10, family="monospace")
+        pdf.savefig(fig)
+        plt.close(fig)
+
+        fig, ax = plt.subplots(figsize=(11, 6))
+        if timestamp_column in forecast_df.columns and f"{target_column}_forecast" in forecast_df.columns:
+            ax.plot(
+                forecast_df[timestamp_column],
+                forecast_df[f"{target_column}_forecast"],
+                marker="o",
+                linewidth=1.5,
+            )
+            ax.set_xlabel(timestamp_column)
+            ax.set_ylabel(f"{target_column} (forecast, original scale)")
+            ax.set_title(f"Forecast preview: {target_column}")
+            fig.autofmt_xdate()
+        else:
+            ax.text(0.5, 0.5, "Forecast columns not found", ha="center", va="center")
+            ax.axis("off")
+        plt.tight_layout()
+        pdf.savefig(fig)
+        plt.close(fig)
+
+        if heatmap_path is not None and heatmap_path.exists():
+            try:
+                from matplotlib.image import imread
+            except ImportError:
+                imread = None
+            fig = plt.figure(figsize=(11, 8.5))
+            if imread is not None:
+                ax = fig.add_axes((0.05, 0.18, 0.9, 0.72))
+                ax.imshow(imread(str(heatmap_path)))
+                ax.axis("off")
+            else:
+                ax = fig.add_axes((0.05, 0.18, 0.9, 0.72))
+                ax.text(0.5, 0.5, "Heatmap PNG could not be embedded.", ha="center", va="center")
+                ax.axis("off")
+            fig.text(
+                0.5,
+                0.94,
+                "Lag x Horizon attribution heatmap",
+                ha="center",
+                fontsize=14,
+                fontweight="bold",
+            )
+            fig.text(
+                0.5,
+                0.10,
+                "Vertical axis: lag back from the last observation (0 = most recent).\n"
+                "Horizontal axis: forecast step (0 = first predicted step).\n"
+                "Brighter = that past step has more influence on that forecast step.",
+                ha="center",
+                va="center",
+                fontsize=9,
+                color="gray",
+            )
+            pdf.savefig(fig)
+            plt.close(fig)
+
+        if topk_rows:
+            header = ["Horizon"]
+            for r in range(1, top_k + 1):
+                header.extend([f"Rank-{r}\nLag", f"Rank-{r}\nProb"])
+
+            rows_per_page = 30
+            chunks = [topk_rows[i : i + rows_per_page] for i in range(0, len(topk_rows), rows_per_page)]
+            num_cols = 1 + 2 * top_k
+            horizon_col = 0.12
+            data_col = max(0.05, (1.0 - horizon_col) / max(1, num_cols - 1))
+            col_widths = [horizon_col] + [data_col] * (num_cols - 1)
+
+            for idx, chunk in enumerate(chunks, start=1):
+                fig = plt.figure(figsize=(11, 8.5))
+                fig.text(
+                    0.5,
+                    0.95,
+                    f"Top-{top_k} lag steps per horizon (page {idx}/{len(chunks)})",
+                    ha="center",
+                    fontsize=14,
+                    fontweight="bold",
+                )
+                fig.text(
+                    0.06,
+                    0.91,
+                    "Horizon: which forecast step (0 = first predicted step).\n"
+                    "Rank-r Lag: how many steps back from the last observation "
+                    "for the r-th most influential past step\n"
+                    "    (1 = most recent past step). Ranked from highest to "
+                    "lowest contribution.\n"
+                    "Rank-r Prob: marginal softmax weight of that ranked lag step "
+                    "on that horizon\n"
+                    "    -- higher means it contributed more to the forecast.",
+                    ha="left",
+                    va="top",
+                    fontsize=9,
+                    color="gray",
+                )
+
+                ax = fig.add_axes((0.04, 0.04, 0.92, 0.78))
+                ax.axis("off")
+                table = ax.table(
+                    cellText=chunk,
+                    colLabels=header,
+                    colWidths=col_widths,
+                    loc="upper center",
+                    cellLoc="center",
+                )
+                table.auto_set_font_size(False)
+                table.set_fontsize(8)
+                table.scale(1.0, 1.25)
+                for c in range(len(header)):
+                    cell = table[(0, c)]
+                    cell.set_facecolor("#dddddd")
+                    cell.set_text_props(weight="bold")
+                    cell.set_height(cell.get_height() * 1.6)
+
+                pdf.savefig(fig)
+                plt.close(fig)
+
+    return pdf_path
+
+
+def _array_to_jsonable(arr: Any) -> Any:
+    """Convert a numpy array (or torch tensor / scalar / None) into JSON-friendly data."""
+    if arr is None:
+        return None
+    if isinstance(arr, np.ndarray):
+        return np.where(np.isfinite(arr), arr, None).tolist() if arr.dtype.kind == "f" else arr.tolist()
+    try:
+        return _array_to_jsonable(np.asarray(arr))
+    except Exception:
+        return None
+
+
+def _scalar_to_jsonable(x: Any) -> Any:
+    if x is None:
+        return None
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return v if np.isfinite(v) else None
+
+
+def _explanation_to_dict(
+    forecast_df: pd.DataFrame,
+    explanation: ForecastExplanation,
+    *,
+    target_column: str,
+    timestamp_column: str = "timestamp",
+    dataset_name: str | None = None,
+    include_full_arrays: bool = True,
+) -> dict[str, Any]:
+    """Render the (forecast, explanation) pair as a JSON-serializable dict."""
+    fc = forecast_df.copy()
+    if timestamp_column in fc.columns and pd.api.types.is_datetime64_any_dtype(fc[timestamp_column]):
+        fc[timestamp_column] = fc[timestamp_column].dt.strftime("%Y-%m-%dT%H:%M:%S")
+    forecast_records = fc.to_dict(orient="records")
+
+    base = np.asarray(explanation.baseline_forecast)
+    scores = np.asarray(explanation.lag_horizon_scores)
+    attrib = np.asarray(explanation.lag_horizon_attributions)
+    C, H = base.shape if base.ndim == 2 else (None, None)
+    K = attrib.shape[0] if attrib.ndim == 2 else None
+
+    surrogate_block: dict[str, Any] | None
+    if explanation.surrogate_coef is not None:
+        surrogate_block = {
+            "coef": _array_to_jsonable(explanation.surrogate_coef),
+            "intercept": _array_to_jsonable(explanation.surrogate_intercept),
+            "feature_layout": explanation.surrogate_feature_layout,
+        }
+    else:
+        surrogate_block = None
+
+    explanation_block: dict[str, Any] = {
+        "shapes": {
+            "C_channels": int(C) if C is not None else None,
+            "H_horizon": int(H) if H is not None else None,
+            "K_lags": int(K) if K is not None else None,
+        },
+        "baseline_forecast": _array_to_jsonable(base),
+        "lag_horizon_scores": _array_to_jsonable(scores),
+        "lag_horizon_attributions": _array_to_jsonable(attrib),
+        "surrogate": surrogate_block,
+        "diagnostics": {
+            "flow_ratio_forecast_vs_history": _scalar_to_jsonable(explanation.flow_ratio_forecast_vs_history),
+            "flow_variance_ratio_forecast_vs_history": _scalar_to_jsonable(
+                explanation.flow_variance_ratio_forecast_vs_history
+            ),
+            "curvature_ratio_forecast_vs_history": _scalar_to_jsonable(explanation.curvature_ratio_forecast_vs_history),
+            "latent_diag_mahalanobis_ratio_forecast_vs_history": _scalar_to_jsonable(
+                explanation.latent_diag_mahalanobis_ratio_forecast_vs_history
+            ),
+        },
+    }
+
+    if include_full_arrays:
+        explanation_block["flow_magnitudes"] = _array_to_jsonable(explanation.flow_magnitudes)
+        explanation_block["latent_trajectory"] = _array_to_jsonable(explanation.latent_trajectory)
+
+    return {
+        "metadata": {
+            "dataset_name": dataset_name,
+            "target_column": target_column,
+            "timestamp_column": timestamp_column,
+            "generated_at": datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "include_full_arrays": bool(include_full_arrays),
+        },
+        "forecast": forecast_records,
+        "explanation": explanation_block,
+    }
+
+
+def _save_explanation_json(
+    *,
+    forecast_df: pd.DataFrame,
+    explanation: ForecastExplanation,
+    path: str | Path,
+    target_column: str,
+    timestamp_column: str = "timestamp",
+    dataset_name: str | None = None,
+    include_full_arrays: bool = True,
+    indent: int | None = 2,
+) -> Path:
+    """Persist the (forecast, explanation) pair as a JSON file."""
+    out_path = Path(path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    payload = _explanation_to_dict(
+        forecast_df,
+        explanation,
+        target_column=target_column,
+        timestamp_column=timestamp_column,
+        dataset_name=dataset_name,
+        include_full_arrays=include_full_arrays,
+    )
+    with out_path.open("w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=indent, allow_nan=False)
+    return out_path
+
+
+def _run_interpretability(
+    *,
+    model: torch.nn.Module,
+    standardizer: Standardizer,
+    working_df: pd.DataFrame,
+    columns_to_process: list[str],
+    timestamp_column: str,
+    target_column: str,
+    seq_len: int,
+    forecast_horizon: int,
+    model_horizon: int,
+    device: torch.device,
+    n_lags: int,
+    softmax_tau: float,
+    interpretability_output: str | None,
+    interpretability_out_dir: str | Path,
+    interpretability_run_name: str | None,
+    interpretability_top_k: int,
+    dataset_name: str | None,
+) -> tuple[pd.DataFrame, Path]:
+    """Generate the lag x horizon explanation, write artifacts, return (forecast_df, run_dir).
+
+    The forecast comes from the explanation's ``baseline_forecast`` (single
+    forward pass, no autoregressive rollout) so callers should treat it as the
+    interpretability-aligned forecast.
+    """
+    if interpretability_output is not None and interpretability_output not in {"json", "pdf"}:
+        raise ValueError(f"interpretability_output must be one of None, 'json', 'pdf'; got {interpretability_output!r}")
+
+    context_df = working_df[[timestamp_column] + columns_to_process].copy().tail(seq_len)
+    values_lc = context_df[columns_to_process].to_numpy(dtype=np.float32)
+    series_lc = standardizer.transform(values_lc)
+    x_context_ct = np.swapaxes(series_lc, 0, 1).copy()
+    input_mask_l = np.ones((seq_len,), dtype=np.int64)
+
+    model.eval()
+    explanation = explain_forecast(
+        model,
+        x_context_ct=x_context_ct,
+        input_mask_l=input_mask_l,
+        model_horizon=model_horizon,
+        forecast_horizon=forecast_horizon,
+        device=device,
+        n_lags=n_lags,
+        softmax_tau=softmax_tau,
+        surrogate=False,
+    )
+
+    base_std = explanation.baseline_forecast
+    H = base_std.shape[1]
+    pred_lc = np.swapaxes(base_std, 0, 1).reshape(-1, base_std.shape[0])
+    pred_orig_lc = standardizer.inverse(pred_lc)
+
+    time_diffs = working_df[timestamp_column].diff().dropna()
+    inferred_freq = (
+        time_diffs.mode()[0]
+        if len(time_diffs.mode()) > 0
+        else (time_diffs.median() if len(time_diffs) else pd.Timedelta(hours=1))
+    )
+    last_input_time = working_df[timestamp_column].iloc[-1]
+    forecast_timestamps = pd.date_range(start=last_input_time + inferred_freq, periods=H, freq=inferred_freq)
+
+    target_idx = 0
+    forecast_values = pred_orig_lc[:, target_idx].astype(np.float32)
+    forecast_df = pd.DataFrame(
+        {
+            timestamp_column: pd.to_datetime(forecast_timestamps),
+            f"{target_column}_forecast": forecast_values,
+        }
+    )
+
+    base_dir = Path(interpretability_out_dir)
+    if interpretability_run_name is None:
+        interpretability_run_name = datetime.now(tz=timezone.utc).strftime("run_%Y%m%d_%H%M%S")
+    run_dir = base_dir / interpretability_run_name
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    forecast_df.to_csv(run_dir / "forecast.csv", index=False)
+
+    write_json = interpretability_output in (None, "json")
+    write_pdf = interpretability_output in (None, "pdf")
+
+    attributions = np.asarray(explanation.lag_horizon_attributions, dtype=np.float32)
+    scores = (
+        np.asarray(explanation.lag_horizon_scores, dtype=np.float32)
+        if getattr(explanation, "lag_horizon_scores", None) is not None
+        else None
+    )
+
+    heatmap_path: Path | None = None
+    topk_rows: list[list[str]] = []
+    if write_pdf:
+        heatmap_path = _save_lag_horizon_artifacts(run_dir, attributions, scores=scores)
+        _, topk_rows = _topk_lag_steps_per_horizon(
+            scores if scores is not None else attributions,
+            top_k=interpretability_top_k,
+        )
+
+    if write_json:
+        _save_explanation_json(
+            forecast_df=forecast_df,
+            explanation=explanation,
+            path=run_dir / "explanation.json",
+            target_column=target_column,
+            timestamp_column=timestamp_column,
+            dataset_name=dataset_name,
+        )
+        print(f"Interpretability JSON written to: {run_dir / 'explanation.json'}")
+
+    if write_pdf:
+        pdf_path = run_dir / "explanation_report.pdf"
+        produced = _build_pdf_report(
+            pdf_path,
+            forecast_df=forecast_df,
+            explanation=explanation,
+            target_column=target_column,
+            timestamp_column=timestamp_column,
+            heatmap_path=heatmap_path,
+            topk_rows=topk_rows,
+            top_k=interpretability_top_k,
+            dataset_name=dataset_name,
+        )
+        if produced is None:
+            print("Interpretability PDF report skipped: matplotlib is not installed.")
+        else:
+            print(f"Interpretability PDF report written to: {pdf_path}")
+
+    return forecast_df, run_dir
+
+
 def perform_forecasting(
     # Input data
     df: pd.DataFrame,
@@ -546,9 +1071,18 @@ def perform_forecasting(
     use_cross_channel: bool = True,
     cross_channel_heads: int = 8,
     cross_channel_dropout: float = 0.1,
+    # Interpretability configuration
+    interpretability: bool = False,
+    interpretability_output: str | None = None,  # "json", "pdf", or None (both)
+    interpretability_out_dir: str | Path = "interpretability_output",
+    interpretability_run_name: str | None = None,
+    interpretability_top_k: int = 5,
+    interpretability_dataset_name: str | None = None,
+    n_lags: int = 128,
+    softmax_tau: float = 1.0,
 ) -> pd.DataFrame:
     """
-    Perform time series forecasting using Tesseract v2 with optional context-enhanced mode (DARR).
+    Perform time series forecasting using NV-Tesseract with optional context-enhanced mode (DARR).
     Supports autoregressive forecasting for horizons beyond the model's native capability.
 
     ALWAYS uses InferenceOnlyDataset - only requires seq_len rows for inference.
@@ -779,6 +1313,37 @@ def perform_forecasting(
             cross_channel_heads=cross_channel_heads,
             cross_channel_dropout=cross_channel_dropout,
         )
+
+        # Interpretability path: produce explanation artifacts (heatmap, top-k
+        # tables, JSON, PDF) using the same loaded model. The forecast returned
+        # comes from the explanation's baseline (single forward pass, no AR
+        # rollout) so that the persisted forecast.csv aligns 1:1 with the
+        # attribution matrix.
+        if interpretability:
+            result_df, run_dir = _run_interpretability(
+                model=model,
+                standardizer=standardizer,
+                working_df=working_df,
+                columns_to_process=columns_to_process,
+                timestamp_column=timestamp_column,
+                target_column=target_column,
+                seq_len=seq_len,
+                forecast_horizon=forecast_horizon,
+                model_horizon=model_horizon,
+                device=device,
+                n_lags=n_lags,
+                softmax_tau=softmax_tau,
+                interpretability_output=interpretability_output,
+                interpretability_out_dir=interpretability_out_dir,
+                interpretability_run_name=interpretability_run_name,
+                interpretability_top_k=interpretability_top_k,
+                dataset_name=interpretability_dataset_name,
+            )
+            print(f"\nInterpretability bundle written to: {run_dir}")
+            if save_preds:
+                result_df.to_csv(save_preds, index=False)
+                print(f"Saved predictions to {save_preds}")
+            return result_df
 
         # Perform inference based on mode
         if mode == "darr":
