@@ -168,7 +168,7 @@ Internally `F` is computed by composing the model's consecutive flow operators a
 
 ### What the SDK gives you
 
-When you call `perform_forecasting(..., interpretability=True)` the SDK runs the same loaded model on the trailing window and writes a self-contained explanation bundle: the K×H matrix as wide and long CSVs, a heatmap PNG, a full `explanation.json` (latent trajectory, semantic-flow magnitudes, and diagnostic ratios that flag whether the forecast segment is volatile relative to history), and a multi-page PDF report. See the **Interpretability (Lag x Horizon Explanations)** example below for the call shape and `sdk/README.md` for the full parameter reference and on-disk artifact catalogue.
+When you call `perform_forecasting(..., interpretability=True)` the SDK runs the same loaded model on the trailing window and writes a self-contained explanation bundle: the K×H matrix as wide and long CSVs, a heatmap PNG, a full `explanation.json` (baseline forecast, lag×horizon scores and attributions, latent trajectory, semantic-flow magnitudes, diagnostic ratios that flag whether the forecast segment is volatile relative to history, and a `trajectory_stability` block with temporal-smoothness metrics over the context window), and a multi-page PDF report whose final page surfaces those stability metrics in a single table. See the **Interpretability (Lag x Horizon Explanations)** example below for the call shape and `sdk/README.md` for the full parameter reference and on-disk artifact catalogue.
 
 ## Usage Examples
 
