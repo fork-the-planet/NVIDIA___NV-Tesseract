@@ -10,7 +10,7 @@ Programmatic entry point for running `perform_forecasting()` on pandas DataFrame
 - **Robust preprocessing**: Converts timestamps, fills numeric NULLs with zeros, enforces minimum sequence length (`seq_len`), and standardizes input using saved standardizer metadata.
 - **Column alignment**: Automatically handles datasets with different feature sets by aligning to common columns, preventing broadcasting errors.
 - **Diverse output**: Produces hybrid, direct, and kNN forecasts when context is provided; otherwise returns only the direct forecast column.
-- **Built-in interpretability**: Opt-in `interpretability=True` flag produces a horizon-resolved lag attribution matrix, supporting CSVs / heatmap PNG, an `explanation.json`, and a self-contained PDF report. Output format is selectable via `interpretability_output` (`"json"`, `"pdf"`, or `None` for both).
+- **Built-in interpretability**: Opt-in `interpretability=True` flag produces a horizon-resolved lag attribution matrix, supporting CSVs / heatmap PNG, an `explanation.json` (lag×horizon, latent trajectory, semantic-flow magnitudes, forecast-vs-history diagnostics, and a `trajectory_stability` block of temporal-smoothness metrics), and a self-contained PDF report that ends with a latent-trajectory stability page. Output format is selectable via `interpretability_output` (`"json"`, `"pdf"`, or `None` for both).
 
 ## Installation
 
@@ -234,11 +234,11 @@ When `interpretability=True`, the run directory contains the following files (se
 | File | Written when | Contents |
 |------|--------------|----------|
 | `forecast.csv` | json, pdf, both | The returned forecast DataFrame |
-| `explanation.json` | json, both | Forecast + full explanation payload (baseline forecast, lag×horizon scores and attributions, latent trajectory, semantic-flow magnitudes, diagnostics, dataset metadata) |
+| `explanation.json` | json, both | Forecast + full explanation payload (baseline forecast, lag×horizon scores and attributions, latent trajectory, semantic-flow magnitudes, `diagnostics` block including `latent_trajectory_shape` and the forecast-vs-history ratios, `trajectory_stability` block with temporal-smoothness metrics over the context window, and dataset metadata) |
 | `lag_horizon_attributions.csv` | pdf, both | Wide K×H attribution matrix |
 | `lag_horizon_long.csv` | pdf, both | Tidy `(lag, horizon, attribution[, score])` table |
 | `lag_horizon_heatmap.png` | pdf, both *(needs matplotlib)* | Visual heatmap, viridis cmap |
-| `explanation_report.pdf` | pdf, both *(needs matplotlib)* | Multi-page report: cover with metadata, forecast preview, lag×horizon heatmap, top-`interpretability_top_k` lag-step tables |
+| `explanation_report.pdf` | pdf, both *(needs matplotlib)* | Multi-page report: (1) cover with metadata, (2) forecast preview, (3) lag×horizon heatmap, (4) top-`interpretability_top_k` lag-step tables, (5) latent-trajectory stability table with per-dimension zero-crossing / direction-flip / relative-jitter (mean & p95) and occupancy metrics |
 
 The run directory path is printed on stdout when the call completes.
 

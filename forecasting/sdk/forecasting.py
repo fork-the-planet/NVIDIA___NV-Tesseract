@@ -29,7 +29,12 @@ from dataset_longhorizon import (
     CSVLongHorizonSimpleDataset,
     Standardizer,
 )
-from interpretability import ForecastExplanation, explain_forecast
+from interpretability import (
+    ForecastExplanation,
+    TrajectoryStabilityReport,
+    compute_trajectory_stability,
+    explain_forecast,
+)
 from model import build_model
 
 # Define DEVICE here to avoid import complexity
@@ -619,6 +624,7 @@ def _build_pdf_report(
     heatmap_path: Path | None,
     topk_rows: list[list[str]],
     top_k: int,
+    trajectory_report: TrajectoryStabilityReport | None = None,
 ) -> Path | None:
     """Compose a multi-page PDF with the forecast and attribution heatmap."""
     try:
@@ -663,11 +669,15 @@ def _build_pdf_report(
             "",
             "What is in this report",
             "----------------------",
-            "1. Forecast preview: Line chart of predicted target values",
-            "2. Lag x Horizon attribution heatmap: Shows how much each past step contributes to each forecast.",
-            "   a) Where lag=0 is the most recent input.",
-            "   b) Leveraging softmax-normalized weights, the heat map depicts which time steps are contributing the most to the forecast i.e. brighter colours highlight the relevant time steps.",
+            "1. Forecast preview: line chart of predicted target values.",
+            "2. Lag x Horizon attribution heatmap: how much each past step",
+            "   contributes to each forecast step.",
+            "   a) lag=0 is the most recent input.",
+            "   b) Softmax-normalized weights; brighter cells = time steps",
+            "      that contribute more to the forecast.",
             "3. Top-k lag steps per horizon (marginal contributions).",
+            "4. Latent trajectory stability: temporal-smoothness metrics",
+            "   over the context window.",
         ]
         fig.text(0.08, 0.85, "\n".join(summary), ha="left", va="top", fontsize=10, family="monospace")
         pdf.savefig(fig)
@@ -788,6 +798,104 @@ def _build_pdf_report(
                 pdf.savefig(fig)
                 plt.close(fig)
 
+        if trajectory_report is not None:
+            r = trajectory_report
+            rows = [
+                [
+                    "Zero-crossing rate (mean / p95)",
+                    f"{r.zero_crossing_rate_mean:.4f}",
+                    f"{r.zero_crossing_rate_p95:.4f}",
+                ],
+                [
+                    "Direction-flip rate (mean / p95)",
+                    f"{r.direction_flip_rate_mean:.4f}",
+                    f"{r.direction_flip_rate_p95:.4f}",
+                ],
+                [
+                    "Relative jitter (mean / p95)",
+                    f"{r.relative_jitter_mean:.4f}",
+                    f"{r.relative_jitter_p95:.4f}",
+                ],
+                [
+                    "Occupancy positive / negative",
+                    f"{r.occupancy_positive_mean:.4f}",
+                    f"{r.occupancy_negative_mean:.4f}",
+                ],
+                ["Latent shape (T / D)", f"{int(r.n_time_steps)}", f"{int(r.n_dimensions)}"],
+            ]
+
+            fig = plt.figure(figsize=(11, 8.5))
+            fig.text(
+                0.5,
+                0.95,
+                "Latent trajectory stability",
+                ha="center",
+                fontsize=14,
+                fontweight="bold",
+            )
+            fig.text(
+                0.06,
+                0.90,
+                "Per-dimension temporal-smoothness metrics for the latent trajectory.\n"
+                "Lower zero-crossing, direction-flip, and relative-jitter values indicate\n"
+                "a smoother embedding (supports the framework's stability assumption).",
+                ha="left",
+                va="top",
+                fontsize=9,
+                color="gray",
+            )
+
+            ax = fig.add_axes((0.08, 0.45, 0.84, 0.35))
+            ax.axis("off")
+            table = ax.table(
+                cellText=rows,
+                colLabels=["Metric", "Value 1", "Value 2"],
+                colWidths=[0.5, 0.25, 0.25],
+                loc="upper center",
+                cellLoc="center",
+            )
+            table.auto_set_font_size(False)
+            table.set_fontsize(9)
+            table.scale(1.0, 1.4)
+            for c in range(3):
+                cell = table[(0, c)]
+                cell.set_facecolor("#dddddd")
+                cell.set_text_props(weight="bold")
+
+            interp_text = (
+                "How to read these metrics\n"
+                "-------------------------\n"
+                "  - Zero-crossing rate: fraction of consecutive steps where the centered\n"
+                "    latent value flips sign. Lower => trajectory stays on one side of the\n"
+                "    reference for longer (less oscillation).\n"
+                "  - Direction-flip rate: fraction of steps where the step direction (delta z)\n"
+                "    reverses sign. Lower => monotone, smoother dynamics.\n"
+                "  - Relative jitter: mean(|delta z|) / mean(|z - center|). Step size relative\n"
+                "    to typical displacement from the reference. Lower => small smooth steps\n"
+                "    relative to overall amplitude.\n"
+                "  - Occupancy positive / negative: fraction of time the centered trajectory\n"
+                "    sits above / below the deadband. Asymmetry can flag regime drift.\n"
+                "  - Latent shape (T / D): number of latent time steps and embedding dim;\n"
+                "    sanity-check that T matches the context length used for this run.\n"
+                "\n"
+                "Pair these with the diagnostics block in explanation.json\n"
+                "(flow_ratio_forecast_vs_history, curvature_ratio_forecast_vs_history,\n"
+                "latent_diag_mahalanobis_ratio_forecast_vs_history) for the forecast-vs-\n"
+                "history comparison."
+            )
+            fig.text(
+                0.06,
+                0.40,
+                interp_text,
+                ha="left",
+                va="top",
+                fontsize=9,
+                family="monospace",
+                color="#333333",
+            )
+            pdf.savefig(fig)
+            plt.close(fig)
+
     return pdf_path
 
 
@@ -813,6 +921,24 @@ def _scalar_to_jsonable(x: Any) -> Any:
     return v if np.isfinite(v) else None
 
 
+def _trajectory_report_to_dict(report: TrajectoryStabilityReport | None) -> dict[str, Any] | None:
+    """Convert a TrajectoryStabilityReport into a JSON-friendly dict (or None)."""
+    if report is None:
+        return None
+    return {
+        "zero_crossing_rate_mean": _scalar_to_jsonable(report.zero_crossing_rate_mean),
+        "zero_crossing_rate_p95": _scalar_to_jsonable(report.zero_crossing_rate_p95),
+        "direction_flip_rate_mean": _scalar_to_jsonable(report.direction_flip_rate_mean),
+        "direction_flip_rate_p95": _scalar_to_jsonable(report.direction_flip_rate_p95),
+        "relative_jitter_mean": _scalar_to_jsonable(report.relative_jitter_mean),
+        "relative_jitter_p95": _scalar_to_jsonable(report.relative_jitter_p95),
+        "occupancy_positive_mean": _scalar_to_jsonable(report.occupancy_positive_mean),
+        "occupancy_negative_mean": _scalar_to_jsonable(report.occupancy_negative_mean),
+        "n_time_steps": int(report.n_time_steps),
+        "n_dimensions": int(report.n_dimensions),
+    }
+
+
 def _explanation_to_dict(
     forecast_df: pd.DataFrame,
     explanation: ForecastExplanation,
@@ -821,6 +947,7 @@ def _explanation_to_dict(
     timestamp_column: str = "timestamp",
     dataset_name: str | None = None,
     include_full_arrays: bool = True,
+    trajectory_report: TrajectoryStabilityReport | None = None,
 ) -> dict[str, Any]:
     """Render the (forecast, explanation) pair as a JSON-serializable dict."""
     fc = forecast_df.copy()
@@ -863,7 +990,13 @@ def _explanation_to_dict(
             "latent_diag_mahalanobis_ratio_forecast_vs_history": _scalar_to_jsonable(
                 explanation.latent_diag_mahalanobis_ratio_forecast_vs_history
             ),
+            "latent_trajectory_shape": (
+                list(np.asarray(explanation.latent_trajectory).shape)
+                if getattr(explanation, "latent_trajectory", None) is not None
+                else None
+            ),
         },
+        "trajectory_stability": _trajectory_report_to_dict(trajectory_report),
     }
 
     if include_full_arrays:
@@ -893,6 +1026,7 @@ def _save_explanation_json(
     dataset_name: str | None = None,
     include_full_arrays: bool = True,
     indent: int | None = 2,
+    trajectory_report: TrajectoryStabilityReport | None = None,
 ) -> Path:
     """Persist the (forecast, explanation) pair as a JSON file."""
     out_path = Path(path)
@@ -905,6 +1039,7 @@ def _save_explanation_json(
         timestamp_column=timestamp_column,
         dataset_name=dataset_name,
         include_full_arrays=include_full_arrays,
+        trajectory_report=trajectory_report,
     )
     with out_path.open("w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=indent, allow_nan=False)
@@ -1009,6 +1144,18 @@ def _run_interpretability(
             top_k=interpretability_top_k,
         )
 
+    trajectory_report: TrajectoryStabilityReport | None = None
+    try:
+        trajectory_report = compute_trajectory_stability(
+            model,
+            x_context_ct,
+            seq_len=seq_len,
+            device=device,
+            batch_size=32,
+        )
+    except Exception as e:
+        print(f"Trajectory stability skipped: {e}")
+
     if write_json:
         _save_explanation_json(
             forecast_df=forecast_df,
@@ -1017,6 +1164,7 @@ def _run_interpretability(
             target_column=target_column,
             timestamp_column=timestamp_column,
             dataset_name=dataset_name,
+            trajectory_report=trajectory_report,
         )
         print(f"Interpretability JSON written to: {run_dir / 'explanation.json'}")
 
@@ -1032,6 +1180,7 @@ def _run_interpretability(
             topk_rows=topk_rows,
             top_k=interpretability_top_k,
             dataset_name=dataset_name,
+            trajectory_report=trajectory_report,
         )
         if produced is None:
             print("Interpretability PDF report skipped: matplotlib is not installed.")
