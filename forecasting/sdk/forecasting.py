@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA Corporation
 # SPDX-License-Identifier: Apache-2.0
 
 import hashlib
@@ -613,6 +613,276 @@ def _topk_lag_steps_per_horizon(
     return step_probs, rows
 
 
+def _semantic_flow_segments(
+    flow: np.ndarray,
+    *,
+    context_len: int,
+    forecast_horizon: int,
+) -> tuple[np.ndarray, np.ndarray, int]:
+    """Split flow_magnitudes into (history, forecast) using the same convention as
+    ``interpretability._flow_segment_ratios``.
+
+    Returns ``(history_flow, forecast_flow, boundary_index)`` where ``boundary_index``
+    is the transition index that marks the first window touching the forecast segment.
+    """
+    f = np.asarray(flow, dtype=np.float32).reshape(-1)
+    T_trans = int(f.shape[0])
+    L = int(context_len)
+    H = int(forecast_horizon)
+    boundary = max(0, L - 1)
+    hist = f[0:boundary] if T_trans > 0 else f
+    fcst = f[boundary : min(T_trans, L + H - 1)] if T_trans > 0 else f
+    return hist, fcst, boundary
+
+
+def _save_semantic_flow_csv(
+    out_dir: Path,
+    flow: np.ndarray,
+    *,
+    context_len: int,
+    forecast_horizon: int,
+    na_rep: str = "nan",
+) -> Path:
+    """Persist per-transition latent flow magnitudes with a segment label.
+
+    Columns: ``transition_index, segment, flow_magnitude`` where ``segment`` is
+    ``"history"`` for transitions whose window sits inside the input context and
+    ``"forecast"`` for transitions whose window extends into the model-generated
+    future. Transitions outside both segments (only possible when ``T-1 > L+H-1``)
+    are labeled ``"tail"``.
+    """
+    f = np.asarray(flow, dtype=np.float32).reshape(-1)
+    T_trans = int(f.shape[0])
+    L = int(context_len)
+    H = int(forecast_horizon)
+    boundary = max(0, L - 1)
+    fcst_end = min(T_trans, L + H - 1)
+
+    segments = np.full((T_trans,), "tail", dtype=object)
+    segments[0:boundary] = "history"
+    segments[boundary:fcst_end] = "forecast"
+
+    df = pd.DataFrame(
+        {
+            "transition_index": np.arange(T_trans, dtype=np.int64),
+            "segment": segments,
+            "flow_magnitude": f,
+        }
+    )
+    out_path = out_dir / "semantic_flow.csv"
+    df.to_csv(out_path, index=False, na_rep=na_rep)
+    return out_path
+
+
+def _semantic_flow_page(
+    pdf: Any,
+    plt: Any,
+    *,
+    explanation: ForecastExplanation,
+    context_len: int,
+    forecast_horizon: int,
+) -> None:
+    """Append a single PDF page summarizing semantic flow magnitudes.
+
+    Layout mirrors the trajectory-stability page: title, gray blurb, a primary
+    visual (line chart of flow over transitions with the history/forecast split
+    annotated), two side-by-side tables (per-segment summary + diagnostics), and
+    a monospace reading guide.
+    """
+    if getattr(explanation, "flow_magnitudes", None) is None:
+        return
+    flow = np.asarray(explanation.flow_magnitudes, dtype=np.float32).reshape(-1)
+    T_trans = int(flow.shape[0])
+    if T_trans == 0:
+        return
+
+    hist, fcst, boundary = _semantic_flow_segments(
+        flow,
+        context_len=context_len,
+        forecast_horizon=forecast_horizon,
+    )
+
+    def _stats(arr: np.ndarray) -> tuple[str, str, str, str, str, str]:
+        a = np.asarray(arr, dtype=np.float32)
+        a = a[np.isfinite(a)]
+        if a.size == 0:
+            return ("--", "--", "--", "--", "--", "0")
+        return (
+            f"{float(np.mean(a)):.4f}",
+            f"{float(np.median(a)):.4f}",
+            f"{float(np.percentile(a, 95)):.4f}",
+            f"{float(np.max(a)):.4f}",
+            f"{float(np.var(a)):.4f}",
+            f"{int(a.size)}",
+        )
+
+    hist_s = _stats(hist)
+    fcst_s = _stats(fcst)
+
+    def _fmt(x: Any) -> str:
+        if x is None:
+            return "n/a"
+        try:
+            xv = float(x)
+        except (TypeError, ValueError):
+            return "n/a"
+        return f"{xv:.4f}" if np.isfinite(xv) else "n/a"
+
+    fig = plt.figure(figsize=(11, 8.5))
+    fig.text(
+        0.5,
+        0.95,
+        "Semantic flow magnitudes",
+        ha="center",
+        fontsize=14,
+        fontweight="bold",
+    )
+    fig.text(
+        0.06,
+        0.90,
+        "Per-step latent flow m_t = ||Z_{t+1} - Z_t||_2 over the trajectory built on\n"
+        "[history; forecast]. This is the temporal signal that drives the lag x horizon\n"
+        "heatmap; bigger spikes contribute more to attribution. Compare the history\n"
+        "segment against the forecast segment to gauge representation-level stability.",
+        ha="left",
+        va="top",
+        fontsize=9,
+        color="gray",
+    )
+
+    ax = fig.add_axes((0.08, 0.52, 0.84, 0.26))
+    x_axis = np.arange(T_trans)
+    ax.plot(x_axis, flow, linewidth=1.0, color="#1f77b4", label="flow magnitude")
+    if 0 < boundary < T_trans:
+        ax.axvspan(boundary, T_trans - 1, color="#f0f0f0", alpha=0.7, zorder=0)
+        ax.axvline(boundary, color="black", linestyle="--", linewidth=0.9, label="history / forecast split")
+    if hist.size > 0:
+        hist_mean = float(np.nanmean(hist))
+        ax.hlines(
+            hist_mean,
+            0,
+            max(0, boundary - 1),
+            colors="#2ca02c",
+            linestyles=":",
+            linewidth=1.2,
+            label=f"history mean ({hist_mean:.3f})",
+        )
+    if fcst.size > 0:
+        fcst_mean = float(np.nanmean(fcst))
+        fcst_end_idx = max(boundary, min(T_trans, int(context_len) + int(forecast_horizon) - 1) - 1)
+        ax.hlines(
+            fcst_mean,
+            boundary,
+            fcst_end_idx,
+            colors="#d62728",
+            linestyles=":",
+            linewidth=1.2,
+            label=f"forecast mean ({fcst_mean:.3f})",
+        )
+    ax.set_xlabel("Latent transition index (t -> t+1)")
+    ax.set_ylabel("||Z_{t+1} - Z_t||_2")
+    ax.legend(loc="upper right", fontsize=8, framealpha=0.85)
+
+    seg_rows = [
+        ["Mean", hist_s[0], fcst_s[0]],
+        ["Median", hist_s[1], fcst_s[1]],
+        ["P95", hist_s[2], fcst_s[2]],
+        ["Max", hist_s[3], fcst_s[3]],
+        ["Variance", hist_s[4], fcst_s[4]],
+        ["Transitions", hist_s[5], fcst_s[5]],
+    ]
+    ax_t1 = fig.add_axes((0.06, 0.32, 0.42, 0.18))
+    ax_t1.axis("off")
+    table_seg = ax_t1.table(
+        cellText=seg_rows,
+        colLabels=["Metric", "History", "Forecast"],
+        colWidths=[0.4, 0.3, 0.3],
+        loc="upper center",
+        cellLoc="center",
+    )
+    table_seg.auto_set_font_size(False)
+    table_seg.set_fontsize(8)
+    table_seg.scale(1.0, 1.3)
+    for c in range(3):
+        cell = table_seg[(0, c)]
+        cell.set_facecolor("#dddddd")
+        cell.set_text_props(weight="bold")
+
+    diag_rows = [
+        [
+            "Flow ratio (fcst/hist)",
+            _fmt(explanation.flow_ratio_forecast_vs_history),
+            "~1 healthy, >1.5 OOD-volatile",
+        ],
+        [
+            "Flow variance ratio",
+            _fmt(explanation.flow_variance_ratio_forecast_vs_history),
+            "~1 healthy, >2 noisy",
+        ],
+        [
+            "Curvature ratio",
+            _fmt(explanation.curvature_ratio_forecast_vs_history),
+            "~1 healthy, >1.5 jaggy",
+        ],
+        [
+            "Latent diag-Mahalanobis ratio",
+            _fmt(explanation.latent_diag_mahalanobis_ratio_forecast_vs_history),
+            "~1 healthy, >>1 OOD shift",
+        ],
+    ]
+    ax_t2 = fig.add_axes((0.52, 0.32, 0.42, 0.18))
+    ax_t2.axis("off")
+    table_diag = ax_t2.table(
+        cellText=diag_rows,
+        colLabels=["Diagnostic", "Value", "Heuristic"],
+        colWidths=[0.42, 0.18, 0.40],
+        loc="upper center",
+        cellLoc="center",
+    )
+    table_diag.auto_set_font_size(False)
+    table_diag.set_fontsize(8)
+    table_diag.scale(1.0, 1.3)
+    for c in range(3):
+        cell = table_diag[(0, c)]
+        cell.set_facecolor("#dddddd")
+        cell.set_text_props(weight="bold")
+
+    interp_text = (
+        "How to read these metrics\n"
+        "-------------------------\n"
+        "  - Per-segment table: mean / median / p95 / max / variance of latent\n"
+        "    flow magnitudes split into history (transitions fully inside the\n"
+        "    input window) and forecast (transitions whose window touches the\n"
+        "    model-generated future).\n"
+        "  - Flow ratio: mean(forecast flow) / mean(history flow). Values near 1\n"
+        "    mean the model's latent dynamics in the OOD segment match history.\n"
+        "    Large values flag attributions in that region as likely noisy.\n"
+        "  - Flow variance ratio: same comparison on variance.\n"
+        "  - Curvature ratio: second-difference energy of Z; spikes when the\n"
+        "    forecast segment becomes much jaggier than history.\n"
+        "  - Latent diag-Mahalanobis ratio: per-dim distance of forecast latents\n"
+        "    from the history mean (scaled by history variance). >>1 indicates a\n"
+        "    representation-level OOD shift.\n"
+        "\n"
+        "These scalars are also under explanation.diagnostics in explanation.json,\n"
+        "and the full series is exported as semantic_flow.csv."
+    )
+    fig.text(
+        0.06,
+        0.30,
+        interp_text,
+        ha="left",
+        va="top",
+        fontsize=9,
+        family="monospace",
+        color="#333333",
+        linespacing=1.05,
+    )
+
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
 def _build_pdf_report(
     pdf_path: Path,
     *,
@@ -625,6 +895,8 @@ def _build_pdf_report(
     topk_rows: list[list[str]],
     top_k: int,
     trajectory_report: TrajectoryStabilityReport | None = None,
+    context_len: int | None = None,
+    forecast_horizon: int | None = None,
 ) -> Path | None:
     """Compose a multi-page PDF with the forecast and attribution heatmap."""
     try:
@@ -676,7 +948,9 @@ def _build_pdf_report(
             "   b) Softmax-normalized weights; brighter cells = time steps",
             "      that contribute more to the forecast.",
             "3. Top-k lag steps per horizon (marginal contributions).",
-            "4. Latent trajectory stability: temporal-smoothness metrics",
+            "4. Semantic flow magnitudes: per-transition latent flow and",
+            "   forecast-vs-history diagnostics.",
+            "5. Latent trajectory stability: temporal-smoothness metrics",
             "   over the context window.",
         ]
         fig.text(0.08, 0.85, "\n".join(summary), ha="left", va="top", fontsize=10, family="monospace")
@@ -797,6 +1071,18 @@ def _build_pdf_report(
 
                 pdf.savefig(fig)
                 plt.close(fig)
+
+        if context_len is not None and forecast_horizon is not None:
+            try:
+                _semantic_flow_page(
+                    pdf,
+                    plt,
+                    explanation=explanation,
+                    context_len=int(context_len),
+                    forecast_horizon=int(forecast_horizon),
+                )
+            except Exception as e:
+                print(f"Semantic flow page skipped: {e}")
 
         if trajectory_report is not None:
             r = trajectory_report
@@ -1143,6 +1429,16 @@ def _run_interpretability(
             scores if scores is not None else attributions,
             top_k=interpretability_top_k,
         )
+        if getattr(explanation, "flow_magnitudes", None) is not None:
+            try:
+                _save_semantic_flow_csv(
+                    run_dir,
+                    np.asarray(explanation.flow_magnitudes, dtype=np.float32),
+                    context_len=seq_len,
+                    forecast_horizon=forecast_horizon,
+                )
+            except Exception as e:
+                print(f"semantic_flow.csv skipped: {e}")
 
     trajectory_report: TrajectoryStabilityReport | None = None
     try:
@@ -1181,6 +1477,8 @@ def _run_interpretability(
             top_k=interpretability_top_k,
             dataset_name=dataset_name,
             trajectory_report=trajectory_report,
+            context_len=seq_len,
+            forecast_horizon=forecast_horizon,
         )
         if produced is None:
             print("Interpretability PDF report skipped: matplotlib is not installed.")

@@ -10,7 +10,7 @@ Programmatic entry point for running `perform_forecasting()` on pandas DataFrame
 - **Robust preprocessing**: Converts timestamps, fills numeric NULLs with zeros, enforces minimum sequence length (`seq_len`), and standardizes input using saved standardizer metadata.
 - **Column alignment**: Automatically handles datasets with different feature sets by aligning to common columns, preventing broadcasting errors.
 - **Diverse output**: Produces hybrid, direct, and kNN forecasts when context is provided; otherwise returns only the direct forecast column.
-- **Built-in interpretability**: Opt-in `interpretability=True` flag produces a horizon-resolved lag attribution matrix, supporting CSVs / heatmap PNG, an `explanation.json` (lag×horizon, latent trajectory, semantic-flow magnitudes, forecast-vs-history diagnostics, and a `trajectory_stability` block of temporal-smoothness metrics), and a self-contained PDF report that ends with a latent-trajectory stability page. Output format is selectable via `interpretability_output` (`"json"`, `"pdf"`, or `None` for both).
+- **Built-in interpretability**: Opt-in `interpretability=True` flag produces a horizon-resolved lag attribution matrix, supporting CSVs / heatmap PNG, a `semantic_flow.csv` of per-transition latent flow magnitudes labeled by history/forecast segment, an `explanation.json` (lag×horizon, latent trajectory, semantic-flow magnitudes, forecast-vs-history diagnostics, and a `trajectory_stability` block of temporal-smoothness metrics), and a self-contained PDF report whose final pages cover semantic-flow magnitudes (line chart over the history/forecast split with per-segment summary statistics and the four forecast-vs-history diagnostic ratios) and latent-trajectory stability. Output format is selectable via `interpretability_output` (`"json"`, `"pdf"`, or `None` for both).
 
 ## Installation
 
@@ -129,7 +129,7 @@ interp_result = perform_forecasting(
 | Value | Files written under `<interpretability_out_dir>/run_<UTC>/` |
 |-------|-------------------------------------------------------------|
 | `"json"` | `forecast.csv`, `explanation.json` |
-| `"pdf"` | `forecast.csv`, `lag_horizon_attributions.csv`, `lag_horizon_long.csv`, `lag_horizon_heatmap.png`, `explanation_report.pdf` |
+| `"pdf"` | `forecast.csv`, `lag_horizon_attributions.csv`, `lag_horizon_long.csv`, `lag_horizon_heatmap.png`, `semantic_flow.csv`, `explanation_report.pdf` |
 | `None`  | All of the above |
 
 The returned DataFrame is the explanation-aligned forecast (single forward pass, so it lines up 1:1 with the attribution matrix). PDF / heatmap require `matplotlib`; if it's missing, those steps are skipped with a warning while JSON output continues to work.
@@ -238,7 +238,8 @@ When `interpretability=True`, the run directory contains the following files (se
 | `lag_horizon_attributions.csv` | pdf, both | Wide K×H attribution matrix |
 | `lag_horizon_long.csv` | pdf, both | Tidy `(lag, horizon, attribution[, score])` table |
 | `lag_horizon_heatmap.png` | pdf, both *(needs matplotlib)* | Visual heatmap, viridis cmap |
-| `explanation_report.pdf` | pdf, both *(needs matplotlib)* | Multi-page report: (1) cover with metadata, (2) forecast preview, (3) lag×horizon heatmap, (4) top-`interpretability_top_k` lag-step tables, (5) latent-trajectory stability table with per-dimension zero-crossing / direction-flip / relative-jitter (mean & p95) and occupancy metrics |
+| `semantic_flow.csv` | pdf, both | Tidy `(transition_index, segment, flow_magnitude)` table, where `segment` is `history` for transitions fully inside the input window, `forecast` for transitions whose window extends into the model-generated future, and `tail` for any trailing transitions outside both segments |
+| `explanation_report.pdf` | pdf, both *(needs matplotlib)* | Multi-page report: (1) cover with metadata, (2) forecast preview, (3) lag×horizon heatmap, (4) top-`interpretability_top_k` lag-step tables, (5) semantic-flow magnitudes page with the per-transition flow time series (history/forecast split annotated), a per-segment summary (mean / median / p95 / max / variance / transition count) and the four forecast-vs-history diagnostic ratios (`flow_ratio`, `flow_variance_ratio`, `curvature_ratio`, `latent_diag_mahalanobis_ratio`), (6) latent-trajectory stability table with per-dimension zero-crossing / direction-flip / relative-jitter (mean & p95) and occupancy metrics |
 
 The run directory path is printed on stdout when the call completes.
 
