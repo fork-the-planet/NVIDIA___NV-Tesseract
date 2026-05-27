@@ -161,6 +161,8 @@ These paths support NVIDIA OSRB / release checklist items:
 
 ## Support
 
+There is no further development on NV-Tesseract but feel free to leverage our existing functionality.
+
 - How to get help: [GitHub Issues](https://github.com/NVIDIA/NV-Tesseract/issues)
 
 ## License
