@@ -2,7 +2,7 @@
 
 Thank you for your interest in this project.
 
-## Issue
+## Issues
 
 Issue logging is currently turned off for this repository
 
@@ -99,4 +99,4 @@ Contributions consisting of commits without a valid sign-off cannot be merged.
 - Lint and format (Ruff): `make lint` / `make lint-fix` from the repository root.
 - Forecasting tests (example): `cd forecasting && uv run pytest sdk/tests`.
 
-Open a pull request against the default branch with a clear description of the change. New pull requests may not be reviewed while the project is in maintenance mode.
+Open a pull request against the default branch with a clear description of the change. New pull requests may not be reviewed while the project development is on hold.
