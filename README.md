@@ -93,10 +93,12 @@ darr_result = perform_forecasting(
 ### Forecasting
 - See [`forecasting/README.md`](forecasting/README.md) for full API reference and examples
 - Run [`forecasting/sdk/quick_example.py`](forecasting/sdk/quick_example.py) for an end-to-end example
+- Fine-tune on your own CSV with [`forecasting/examples/finetune_example.py`](forecasting/examples/finetune_example.py)
 
 ### Anomaly Detection
 - See [`ad_diffusion/README.md`](ad_diffusion/README.md) for detailed usage and configuration
 - Run [`ad_diffusion/examples/quick_example.py`](ad_diffusion/examples/quick_example.py) for an end-to-end example with synthetic or custom datasets
+- Fine-tune on normal windows from your own CSV with [`ad_diffusion/examples/finetune_example.py`](ad_diffusion/examples/finetune_example.py)
 
 ## Capabilities
 
@@ -113,6 +115,7 @@ NV-Tesseract/
 ├── forecasting/                 # Time series forecasting
 │   ├── pyproject.toml           # Project configuration  
 │   ├── README.md                # Forecasting documentation
+│   ├── examples/                # Fine-tuning examples
 │   ├── model.py                 # Model construction utilities
 │   ├── dataset_longhorizon.py   # Dataset classes for long-horizon forecasting
 │   └── sdk/
@@ -130,6 +133,7 @@ NV-Tesseract/
 │   ├── utils/                   # Preprocessing and utilities
 │   └── examples/                # Usage examples and datasets
 │       ├── quick_example.py     # Complete example (synthetic + custom data)
+│       ├── finetune_example.py  # CSV fine-tuning example
 │       └── datasets/            # Sample datasets and documentation
 └── Makefile                     # Linting and formatting commands
 ```

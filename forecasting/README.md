@@ -67,6 +67,61 @@ Or run the example:
 uv run python sdk/quick_example.py
 ```
 
+## Fine-tuning
+
+Use `examples/finetune_example.py` to fine-tune NV-Tesseract on your own forecasting data. The CSV must include a timestamp column and one or more numeric target columns. By default, the script freezes the pretrained encoder/embedder and trains the forecasting head.
+
+```bash
+uv run python examples/finetune_example.py \
+  --csv /path/to/your_timeseries.csv \
+  --timestamp-col timestamp \
+  --target-cols target \
+  --seq-len 512 \
+  --forecast-horizon 72 \
+  --epochs 5 \
+  --output-dir artifacts/finetune_my_data
+```
+
+For multivariate channel-mixing fine-tuning, enable the cross-channel layer and optionally warm-start from an existing compatible checkpoint:
+
+```bash
+uv run python examples/finetune_example.py \
+  --csv /path/to/multivariate_timeseries.csv \
+  --timestamp-col timestamp \
+  --target-cols sensor_1,sensor_2,sensor_3 \
+  --seq-len 512 \
+  --forecast-horizon 72 \
+  --use-cross-channel \
+  --cross-channel-heads 8 \
+  --cross-channel-dropout 0.1 \
+  --ckpt-init run8_best_model_cr.pt \
+  --epochs 5 \
+  --output-dir artifacts/finetune_channel_mixing
+```
+
+The output directory contains:
+
+- `best_model.pt` - fine-tuned checkpoint
+- `standardizer.pkl` - training normalization statistics
+- `finetune_metadata.json` - model, data, and training metadata
+- `metrics.json` - training and validation metrics for all epochs
+
+Use the fine-tuned artifacts with the SDK:
+
+```python
+results = perform_forecasting(
+    df=df,
+    timestamp_column="timestamp",
+    target_column="target",
+    seq_len=512,
+    forecast_horizon=72,
+    model_horizon=72,
+    standardizer_pkl="artifacts/finetune_my_data/standardizer.pkl",
+    ckpt="artifacts/finetune_my_data/best_model.pt",
+    use_cross_channel=False,  # set True if trained with --use-cross-channel
+)
+```
+
 ## UV Commands Reference
 
 ### Package Management
@@ -98,6 +153,8 @@ source .venv/bin/activate  # Activate environment (Unix)
 forecasting/
 ├── pyproject.toml         # Project configuration and dependencies
 ├── README.md             # This file
+├── examples/
+│   └── finetune_example.py # CSV fine-tuning example
 ├── sdk/
 │   ├── forecasting.py    # Main forecasting module (with auto-download)
 │   ├── quick_example.py  # Example usage script
@@ -299,4 +356,3 @@ If you see `Interpretability PDF report skipped: matplotlib is not installed.`, 
 ```bash
 uv add matplotlib
 ```
-
