@@ -42,6 +42,11 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from dataset_longhorizon import CSVLongHorizonDataset, CSVLongHorizonSimpleDataset
 from model import build_model, count_trainable_params
+from sdk.forecasting import (
+    DEFAULT_CHECKPOINT_NAME,
+    DEFAULT_CROSS_CHANNEL_CHECKPOINT_NAME,
+    download_model_weights,
+)
 
 LOGGER = logging.getLogger("forecasting_finetune")
 
@@ -127,12 +132,38 @@ def build_datasets(args: argparse.Namespace) -> tuple[Any, Any]:
     return train_dataset, val_dataset
 
 
+def resolve_checkpoint_init(args: argparse.Namespace) -> str | None:
+    if args.ckpt_init is None or args.ckpt_init.lower() in {"none", "false", "0"}:
+        return None
+    if args.ckpt_init.lower() != "auto":
+        return args.ckpt_init
+
+    ckpt_name = DEFAULT_CROSS_CHANNEL_CHECKPOINT_NAME if args.use_cross_channel else DEFAULT_CHECKPOINT_NAME
+    _, ckpt_path = download_model_weights(
+        standardizer_pkl=args.standardizer_init,
+        ckpt=ckpt_name,
+        repo_id=args.repo_id,
+    )
+    return ckpt_path
+
+
 def load_checkpoint(model: torch.nn.Module, ckpt_path: str, device: torch.device) -> None:
     checkpoint = torch.load(ckpt_path, map_location=device)
     state_dict = checkpoint.get("model", checkpoint) if isinstance(checkpoint, dict) else checkpoint
-    load_result = model.load_state_dict(state_dict, strict=False)
+    model_state = model.state_dict()
+    compatible_state = {}
+    skipped = []
+    for key, value in state_dict.items():
+        if key in model_state and tuple(model_state[key].shape) == tuple(value.shape):
+            compatible_state[key] = value
+        else:
+            skipped.append(key)
+
+    load_result = model.load_state_dict(compatible_state, strict=False)
     missing = list(getattr(load_result, "missing_keys", []))
     unexpected = list(getattr(load_result, "unexpected_keys", []))
+    if skipped:
+        LOGGER.info("Skipped incompatible checkpoint keys: %s", skipped)
     if unexpected:
         LOGGER.warning("Unexpected checkpoint keys: %s", unexpected)
     if missing:
@@ -175,7 +206,9 @@ def train_one_epoch(
 
 
 @torch.no_grad()
-def evaluate(model: torch.nn.Module, loader: DataLoader, criterion: torch.nn.Module, device: torch.device) -> tuple[float, float]:
+def evaluate(
+    model: torch.nn.Module, loader: DataLoader, criterion: torch.nn.Module, device: torch.device
+) -> tuple[float, float]:
     model.eval()
     losses: list[float] = []
     maes: list[float] = []
@@ -237,10 +270,22 @@ def parse_args() -> argparse.Namespace:
     data_group.add_argument("--train-csv", type=str, help="Training CSV. Requires --val-csv.")
     parser.add_argument("--val-csv", type=str, help="Validation CSV when --train-csv is used.")
     parser.add_argument("--timestamp-col", type=str, default="timestamp")
-    parser.add_argument("--target-cols", type=str, default=None, help="Comma-separated numeric columns. Defaults to all numeric columns.")
+    parser.add_argument(
+        "--target-cols",
+        type=str,
+        default=None,
+        help="Comma-separated numeric columns. Defaults to all numeric columns.",
+    )
 
     parser.add_argument("--model-name", type=str, default="AutonLab/MOMENT-1-large")
-    parser.add_argument("--ckpt-init", type=str, default=None, help="Optional checkpoint to warm-start from.")
+    parser.add_argument(
+        "--ckpt-init",
+        type=str,
+        default="auto",
+        help="Checkpoint to warm-start from. Use 'auto' for published NV-Tesseract weights or 'none' for a fresh head.",
+    )
+    parser.add_argument("--standardizer-init", type=str, default="standardizer.pkl")
+    parser.add_argument("--repo-id", type=str, default="nvidia/nv-tesseract-forecasting")
     parser.add_argument("--seq-len", type=int, default=512)
     parser.add_argument("--forecast-horizon", type=int, default=72)
     parser.add_argument("--stride", type=int, default=None)
@@ -315,8 +360,10 @@ def main() -> None:
         local_files_only=args.local_files_only,
         device=str(device),
     )
-    if args.ckpt_init:
-        load_checkpoint(model, args.ckpt_init, device)
+    ckpt_init = resolve_checkpoint_init(args)
+    if ckpt_init:
+        LOGGER.info("Warm-starting from checkpoint: %s", ckpt_init)
+        load_checkpoint(model, ckpt_init, device)
 
     LOGGER.info("Trainable parameters: %s", f"{count_trainable_params(model):,}")
 

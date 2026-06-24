@@ -69,7 +69,7 @@ uv run python sdk/quick_example.py
 
 ## Fine-tuning
 
-Use `examples/finetune_example.py` to fine-tune NV-Tesseract on your own forecasting data. The CSV must include a timestamp column and one or more numeric target columns. By default, the script freezes the pretrained encoder/embedder and trains the forecasting head.
+Use `examples/finetune_example.py` to fine-tune NV-Tesseract on your own forecasting data. The CSV must include a timestamp column and one or more numeric target columns. By default, the script auto-downloads the published NV-Tesseract forecasting checkpoint, freezes the pretrained encoder/embedder, and trains the forecasting head. Pass `--ckpt-init none` if you want to train a fresh head from the base backbone instead.
 
 ```bash
 uv run python examples/finetune_example.py \
@@ -82,7 +82,7 @@ uv run python examples/finetune_example.py \
   --output-dir artifacts/finetune_my_data
 ```
 
-For multivariate channel-mixing fine-tuning, enable the cross-channel layer and optionally warm-start from an existing compatible checkpoint:
+For multivariate channel-mixing fine-tuning, enable the cross-channel layer. With `--ckpt-init auto` (the default), the script warm-starts from the published cross-channel checkpoint:
 
 ```bash
 uv run python examples/finetune_example.py \
@@ -94,7 +94,6 @@ uv run python examples/finetune_example.py \
   --use-cross-channel \
   --cross-channel-heads 8 \
   --cross-channel-dropout 0.1 \
-  --ckpt-init run8_best_model_cr.pt \
   --epochs 5 \
   --output-dir artifacts/finetune_channel_mixing
 ```

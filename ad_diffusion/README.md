@@ -234,11 +234,13 @@ The output directory contains:
 - `metrics.json` - training and validation losses
 - `finetune_config.yaml` - model configuration used for fine-tuning
 
-Run anomaly detection with the fine-tuned checkpoint:
+Run anomaly detection with the fine-tuned checkpoint. Pass only numeric analysis columns to `df`; drop timestamp, label, and other metadata columns before calling the SDK.
 
 ```python
+analysis_df = df.select_dtypes(include="number").drop(columns=["is_anomaly"], errors="ignore")
+
 results = perform_anomaly_analysis_with_diffusion(
-    df=df,
+    df=analysis_df,
     threshold_strategy="scs",
     model_path="artifacts/finetune_my_data/best_finetuned_model.pth",
     config_path="artifacts/finetune_my_data/finetune_config.yaml",

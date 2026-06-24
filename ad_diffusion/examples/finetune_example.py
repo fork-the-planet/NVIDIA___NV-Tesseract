@@ -39,8 +39,8 @@ from tqdm import tqdm
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from models.main_model import TSDiffuser_Generic  # noqa: E402
-from sdk.inference_ad import (  # noqa: E402
+from models.main_model import TSDiffuser_Generic
+from sdk.inference_ad import (
     DEFAULT_CONFIG_FILENAME,
     DEFAULT_MODEL_FILENAME,
     HF_REPO_ID,
