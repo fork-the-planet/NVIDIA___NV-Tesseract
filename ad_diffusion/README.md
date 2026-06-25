@@ -155,6 +155,7 @@ ad_diffusion/
 │   └── dpm_solver_pytorch.py  # DPM-Solver for fast inference
 ├── examples/                   # Examples and sample data
 │   ├── quick_example.py       # Complete usage example
+│   ├── finetune_example.py    # CSV fine-tuning example
 │   └── datasets/              # Sample datasets for testing
 ├── README.md                  # This file
 ├── pyproject.toml            # Project configuration
@@ -199,6 +200,55 @@ This example demonstrates:
 - Applying adaptive thresholding (SCS/MACS)
 - Using both synthetic and real-world datasets
 - Evaluating results against ground truth
+
+## Fine-tuning
+
+Use `examples/finetune_example.py` to fine-tune AD Diffusion on normal windows from your own data. The CSV should contain mostly normal behavior. Numeric feature columns are used for training; use `--timestamp-col`, `--label-col`, and `--drop-cols` to remove metadata columns from the feature matrix.
+
+```bash
+uv run python examples/finetune_example.py \
+  --csv /path/to/normal_training_data.csv \
+  --timestamp-col timestamp \
+  --label-col is_anomaly \
+  --epochs 10 \
+  --batch-size 16 \
+  --lr 1e-5 \
+  --output-dir artifacts/finetune_my_data
+```
+
+When using the default temporal validation split, the validation partition must contain at least `--window-length` rows. The default `--val-ratio 0.3` works with the bundled 500-row sample dataset and default `--window-length 100`. If you lower `--val-ratio`, either increase the dataset size, pass a separate `--val-csv`, or reduce `--window-length`.
+
+To use a separate validation file instead of a temporal split:
+
+```bash
+uv run python examples/finetune_example.py \
+  --csv /path/to/train_normal.csv \
+  --val-csv /path/to/val_normal.csv \
+  --timestamp-col timestamp \
+  --epochs 10 \
+  --output-dir artifacts/finetune_my_data
+```
+
+The output directory contains:
+
+- `best_finetuned_model.pth` - best validation checkpoint, compatible with the SDK inference loader
+- `final_finetuned_model.pth` - final epoch checkpoint
+- `metrics.json` - training and validation losses
+- `finetune_config.yaml` - model configuration used for fine-tuning
+
+Run anomaly detection with the fine-tuned checkpoint. Pass only numeric analysis columns to `df`; drop timestamp, label, and other metadata columns before calling the SDK.
+
+```python
+analysis_df = df.select_dtypes(include="number").drop(columns=["is_anomaly"], errors="ignore")
+
+results = perform_anomaly_analysis_with_diffusion(
+    df=analysis_df,
+    threshold_strategy="scs",
+    model_path="artifacts/finetune_my_data/best_finetuned_model.pth",
+    config_path="artifacts/finetune_my_data/finetune_config.yaml",
+    nsample=15,
+)
+```
 
 ## System Requirements
 
