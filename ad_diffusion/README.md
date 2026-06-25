@@ -216,6 +216,8 @@ uv run python examples/finetune_example.py \
   --output-dir artifacts/finetune_my_data
 ```
 
+When using the default temporal validation split, the validation partition must contain at least `--window-length` rows. The default `--val-ratio 0.3` works with the bundled 500-row sample dataset and default `--window-length 100`. If you lower `--val-ratio`, either increase the dataset size, pass a separate `--val-csv`, or reduce `--window-length`.
+
 To use a separate validation file instead of a temporal split:
 
 ```bash

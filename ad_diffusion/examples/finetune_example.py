@@ -340,7 +340,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--split", type=int, default=None, help="Number of alternating mask segments per window.")
     parser.add_argument("--mask-ratio", type=float, default=0.7, help="Random masking ratio used during training.")
     parser.add_argument("--scale-factor", type=float, default=None)
-    parser.add_argument("--val-ratio", type=float, default=0.1)
+    parser.add_argument(
+        "--val-ratio",
+        type=float,
+        default=0.3,
+        help="Temporal validation fraction when --val-csv is not used. Keep validation rows >= --window-length.",
+    )
     return parser.parse_args()
 
 
