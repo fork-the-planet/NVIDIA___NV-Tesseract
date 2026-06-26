@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Continuous integration: lint (Ruff) + forecasting unit tests.
+# Continuous integration: lint (Ruff) + lightweight CPU-only unit tests.
 # Requires: uv (https://docs.astral.sh/uv/) — same as local Makefile.
 
 name: CI
@@ -40,4 +40,10 @@ jobs:
         working-directory: forecasting
         run: |
           uv sync --group dev --frozen --python 3.12
-          uv run --python 3.12 pytest sdk/tests -q --tb=short
+          uv run --python 3.12 pytest sdk/tests examples/tests -q --tb=short
+
+      - name: Install AD diffusion package and run tests
+        working-directory: ad_diffusion
+        run: |
+          uv sync --group dev --frozen --python 3.12
+          uv run --python 3.12 pytest sdk/tests examples/tests -q --tb=short
