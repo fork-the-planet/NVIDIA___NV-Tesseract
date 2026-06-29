@@ -150,13 +150,11 @@ NV-Tesseract/
 │   └── sdk/
 │       ├── forecasting.py       # Core perform_forecasting() implementation
 │       ├── quick_example.py     # End-to-end usage example
-│       ├── bench_quick_example.py  # Benchmarking helper for quick_example
 │       ├── README.md            # SDK parameter and artifact reference
 │       └── tests/               # Test suite and sample datasets
 ├── ad_diffusion/                # Multivariate anomaly detection
 │   ├── pyproject.toml           # Project configuration
 │   ├── README.md                # AD diffusion documentation
-│   ├── curriculum_medium.yaml   # Default pretrained model configuration
 │   ├── sdk/                     # Main inference functions
 │   │   ├── anomaly_analysis.py  # Main API function
 │   │   ├── inference_ad.py      # Core diffusion inference
