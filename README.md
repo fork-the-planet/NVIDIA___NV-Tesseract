@@ -143,21 +143,6 @@ NV-Tesseract/
 - Start here: [`CONTRIBUTING.md`](CONTRIBUTING.md) — includes Developer Certificate of Origin (`Signed-off-by`) and IP-review expectations for NVIDIA contributors.
 - Code of Conduct: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
 
-## Legal and open source notices
-
-These paths support NVIDIA OSRB / release checklist items:
-
-| Item | Location in this repo |
-|------|------------------------|
-| Apache License 2.0 (project) | [`LICENSE`](LICENSE) |
-| NOTICE (Apache 2.0 §4(d) attributions) | [`NOTICE`](NOTICE) |
-| Third-party MIT (DPM-Solver) in LICENSE | [`LICENSE`](LICENSE) — section **ADDITIONAL THIRD-PARTY LICENSES** |
-| Third-party and dependency notices | [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md); upstream license **files** for included source under [`third_party/`](third_party/) |
-| Per-file SPDX / copyright headers | Python sources under `forecasting/`, `ad_diffusion/`, `scripts/` (see [`CONTRIBUTING.md`](CONTRIBUTING.md)) |
-| Developer Certificate of Origin (DCO) | [`CONTRIBUTING.md`](CONTRIBUTING.md#developer-certificate-of-origin) — canonical text: [developercertificate.org](https://developercertificate.org/) |
-
-**VP approval** for a given release is recorded in your internal OSRB bug / workflow; it is not stored in this repository.
-
 ## Security
 
 - Vulnerability disclosure: `SECURITY.md`
