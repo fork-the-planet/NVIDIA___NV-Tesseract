@@ -67,7 +67,7 @@ darr_result = perform_forecasting(
 
 #### Interpretability
 
-Forecasting includes a model-agnostic **lag×horizon interpretability** framework that explains which past inputs influenced each future forecast step — without modifying the underlying model. Pass `interpretability=True` to write an explanation bundle (JSON, CSVs, heatmap, and optional PDF report) alongside the forecast:
+Forecasting includes a model-agnostic **interpretability** framework that explains *why* a forecast looks the way it does — without modifying the underlying model. Pass `interpretability=True` to write an explanation bundle alongside the forecast: input attributions per horizon, semantic-flow magnitudes in latent space, forecast-vs-history diagnostic ratios, and latent trajectory stability metrics (JSON, CSVs, and optional PDF report):
 
 ```python
 results = perform_forecasting(
@@ -81,7 +81,7 @@ results = perform_forecasting(
 # Bundle written under interpretability_output/run_<UTC-timestamp>/
 ```
 
-See [`forecasting/README.md`](forecasting/README.md#interpretability) for the full attribution engine and artifact catalogue.
+See [`forecasting/README.md`](forecasting/README.md#interpretability) for the full interpretability reference and artifact catalogue.
 
 #### Anomaly Detection
 ```python
@@ -143,7 +143,7 @@ NV-Tesseract/
 │   ├── backbone.py              # Vendored transformer backbone
 │   ├── model.py                 # Model construction utilities
 │   ├── dataset_longhorizon.py   # Dataset classes for long-horizon forecasting
-│   ├── interpretability.py      # Lag×horizon interpretability engine
+│   ├── interpretability.py      # Model-agnostic forecast explanation engine
 │   ├── examples/
 │   │   ├── finetune_example.py  # CSV fine-tuning example
 │   │   └── tests/               # Fine-tuning example tests
