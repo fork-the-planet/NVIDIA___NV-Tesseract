@@ -51,6 +51,38 @@ forecasts = perform_forecasting(
 # Returns a DataFrame with `target_forecast` column containing 72 predictions
 ```
 
+#### DARR (Context-Enhanced) Forecasting
+
+```python
+darr_result = perform_forecasting(
+    df=df,
+    context_df=historical_df,  # Historical data for kNN retrieval
+    seq_len=512,
+    forecast_horizon=72,
+    alpha=0.2,   # 20% direct, 80% kNN
+    k=64,
+    temperature=0.05,
+)
+```
+
+#### Interpretability
+
+Forecasting includes a model-agnostic **lag×horizon interpretability** framework that explains which past inputs influenced each future forecast step — without modifying the underlying model. Pass `interpretability=True` to write an explanation bundle (JSON, CSVs, heatmap, and optional PDF report) alongside the forecast:
+
+```python
+results = perform_forecasting(
+    df=df,
+    seq_len=512,
+    forecast_horizon=72,
+    interpretability=True,
+    interpretability_output=None,  # "json", "pdf", or None for both
+    interpretability_out_dir="interpretability_output",
+)
+# Bundle written under interpretability_output/run_<UTC-timestamp>/
+```
+
+See [`forecasting/README.md`](forecasting/README.md#interpretability) for the full attribution engine and artifact catalogue.
+
 #### Anomaly Detection
 ```python
 from sdk.anomaly_analysis import perform_anomaly_analysis_with_diffusion
@@ -64,20 +96,6 @@ results = perform_anomaly_analysis_with_diffusion(
     nsample=15,
 )
 # Returns DataFrame with anomaly scores and binary anomaly flags
-```
-
-### DARR (Context-Enhanced) Forecasting
-
-```python
-darr_result = perform_forecasting(
-    df=df,
-    context_df=historical_df,  # Historical data for kNN retrieval
-    seq_len=512,
-    forecast_horizon=72,
-    alpha=0.2,   # 20% direct, 80% kNN
-    k=64,
-    temperature=0.05,
-)
 ```
 
 ## Requirements
@@ -111,30 +129,54 @@ darr_result = perform_forecasting(
 
 ```
 NV-Tesseract/
+├── .github/
+│   └── workflows/
+│       └── ci.yml               # CI pipeline
+├── scripts/
+│   └── add_spdx_headers.py     # SPDX license header tooling
 ├── third_party/                 # Upstream LICENSE files for vendored/in-tree third-party code
+│   ├── README.md
+│   └── dpm-solver/
 ├── forecasting/                 # Time series forecasting
-│   ├── pyproject.toml           # Project configuration  
+│   ├── pyproject.toml           # Project configuration
 │   ├── README.md                # Forecasting documentation
-│   ├── examples/                # Fine-tuning examples
+│   ├── backbone.py              # Vendored transformer backbone
 │   ├── model.py                 # Model construction utilities
 │   ├── dataset_longhorizon.py   # Dataset classes for long-horizon forecasting
+│   ├── interpretability.py      # Lag×horizon interpretability engine
+│   ├── examples/
+│   │   ├── finetune_example.py  # CSV fine-tuning example
+│   │   └── tests/               # Fine-tuning example tests
 │   └── sdk/
 │       ├── forecasting.py       # Core perform_forecasting() implementation
 │       ├── quick_example.py     # End-to-end usage example
-│       └── tests/               # Test datasets and examples
+│       ├── bench_quick_example.py  # Benchmarking helper for quick_example
+│       ├── README.md            # SDK parameter and artifact reference
+│       └── tests/               # Test suite and sample datasets
 ├── ad_diffusion/                # Multivariate anomaly detection
 │   ├── pyproject.toml           # Project configuration
-│   ├── README.md                # AD diffusion documentation  
+│   ├── README.md                # AD diffusion documentation
+│   ├── curriculum_medium.yaml   # Default pretrained model configuration
 │   ├── sdk/                     # Main inference functions
 │   │   ├── anomaly_analysis.py  # Main API function
 │   │   ├── inference_ad.py      # Core diffusion inference
-│   │   └── thresholds.py        # SCS/MACS adaptive thresholding
+│   │   ├── inference_worker.py  # Multi-GPU worker
+│   │   ├── thresholds.py        # SCS/MACS adaptive thresholding
+│   │   └── tests/               # SDK tests
 │   ├── models/                  # Diffusion model implementations
+│   │   ├── main_model.py
+│   │   ├── diff_models.py
+│   │   └── utils.py
 │   ├── utils/                   # Preprocessing and utilities
+│   │   ├── tsb_ad_preprocessor.py
+│   │   ├── adaptive_threshold.py
+│   │   ├── json_utils.py
+│   │   └── dpm_solver_pytorch.py
 │   └── examples/                # Usage examples and datasets
 │       ├── quick_example.py     # Complete example (synthetic + custom data)
 │       ├── finetune_example.py  # CSV fine-tuning example
-│       └── datasets/            # Sample datasets and documentation
+│       ├── datasets/            # Sample datasets and documentation
+│       └── tests/               # Example tests
 └── Makefile                     # Linting and formatting commands
 ```
 
