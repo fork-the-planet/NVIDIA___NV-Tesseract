@@ -38,7 +38,7 @@ import pandas as pd
 import numpy as np
 
 df = pd.DataFrame({
-    "timestamp": pd.date_range("2023-01-01", periods=600, freq="H"),
+    "timestamp": pd.date_range("2023-01-01", periods=600, freq="h"),
     "target": np.sin(np.linspace(0, 4 * np.pi, 600)),
     "feature_a": np.random.randn(600),
 })
