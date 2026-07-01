@@ -1558,6 +1558,12 @@ def perform_forecasting(
     if forecast_horizon > MAX_FORECAST_HORIZON:
         raise ValueError(f"forecast_horizon must be <= {MAX_FORECAST_HORIZON}, got {forecast_horizon}")
 
+    # The model's native horizon limits direct predictions, but DARR retrieves
+    # observed continuations from context data. Keep the existing native-sized
+    # context windows for shorter requests while retaining the full retrieval
+    # trajectory whenever callers ask for a longer forecast.
+    darr_context_horizon = max(model_horizon, forecast_horizon)
+
     # Input validation
     if df is None or df.empty:
         raise ValueError("Input DataFrame is required and cannot be empty")
@@ -1670,11 +1676,12 @@ def perform_forecasting(
                 raise ValueError(f"Context DataFrame missing target column '{target_column}'")
 
             # Validate context DataFrame has enough rows for at least one window
-            min_context_rows = seq_len + model_horizon
+            min_context_rows = seq_len + darr_context_horizon
             if len(context_df) < min_context_rows:
                 raise ValueError(
                     f"Context DataFrame has {len(context_df)} rows but requires at least "
-                    f"{min_context_rows} rows (seq_len={seq_len} + model_horizon={model_horizon})"
+                    f"{min_context_rows} rows "
+                    f"(seq_len={seq_len} + context_horizon={darr_context_horizon})"
                 )
 
             # Process context DataFrame similarly to main DataFrame
@@ -1804,12 +1811,14 @@ def perform_forecasting(
         if mode == "darr":
             # Context-Enhanced Forecasting (DARR Mode)
 
-            # Create context dataset with model_horizon (needs ground truth)
+            # Retrieve observed context continuations for the entire requested
+            # horizon. The native model horizon only constrains the direct
+            # component, which is extended autoregressively below.
             context_dataset = CSVLongHorizonSimpleDataset(
                 csv_path=context_csv_path,
                 data_split="train",
                 seq_len=seq_len,
-                forecast_horizon=model_horizon,  # Use model's native horizon
+                forecast_horizon=darr_context_horizon,
                 standardizer=None,
                 standardize=False,
                 stride=context_stride,
@@ -1821,7 +1830,8 @@ def perform_forecasting(
                 context_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True
             )
 
-            # Build context memory (using model_horizon)
+            # Build context memory with observed continuations long enough for
+            # the requested retrieval forecast.
             DB_E, DB_Y = build_context_memory(model, context_loader, device, cosine=True)
             # print(f"Context memory built: {DB_E.shape} embeddings, {DB_Y.shape} futures")
 
@@ -1850,18 +1860,8 @@ def perform_forecasting(
             preds_direct = np.concatenate(preds_direct, axis=0)
 
             # kNN retrieval forecast
-            preds_knn_base = knn_forecast(DB_E, DB_Y, Q_E, k=k, temperature=temperature)
-
-            # If forecast_horizon > model_horizon, extend kNN predictions
-            if forecast_horizon > model_horizon:
-                B, C, H = preds_knn_base.shape
-                preds_knn = np.zeros((B, C, forecast_horizon), dtype=np.float32)
-                preds_knn[:, :, :H] = preds_knn_base
-                # Extend with last value
-                for h in range(H, forecast_horizon):
-                    preds_knn[:, :, h] = preds_knn_base[:, :, -1]
-            else:
-                preds_knn = preds_knn_base[:, :, :forecast_horizon]
+            preds_knn = knn_forecast(DB_E, DB_Y, Q_E, k=k, temperature=temperature)
+            preds_knn = preds_knn[:, :, :forecast_horizon]
 
             # Validate shapes before combining predictions
             if preds_direct.shape != preds_knn.shape:
