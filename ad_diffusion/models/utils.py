@@ -315,7 +315,7 @@ def evaluate(
                 target_mask1_expanded = eval_points.unsqueeze(1)
                 target_mask2_expanded = eval_points2.unsqueeze(1)
                 # Combine samples based on expanded target masks
-                samples = target_mask1_expanded * samples2_old + target_mask2_expanded * samples1_old
+                samples = target_mask1_expanded * samples1_old + target_mask2_expanded * samples2_old
 
                 samples_median = samples.median(dim=1)
                 all_target.append(c_target)
