@@ -178,6 +178,14 @@ def download_model_weights(
     Raises:
         ImportError: If huggingface_hub is not installed
         Exception: If download fails
+
+    Note:
+        Weights are published on the Hugging Face repository and download
+        without authentication. If a download fails with 401/403, accept the
+        model license on the repo page or authenticate first:
+            1. Install the CLI:  `uv add huggingface_hub[cli]`
+            2. Login:            `huggingface-cli login`
+            3. Or set a token:   `export HUGGINGFACE_HUB_TOKEN='your_token'`
     """
     standardizer_path = Path(standardizer_pkl)
     checkpoint_path = Path(ckpt)
@@ -227,7 +235,7 @@ def download_model_weights(
         error_msg = f"Failed to download model weights: {e}"
         if "401" in str(e) or "403" in str(e):
             error_msg += (
-                "\n\nAuthentication required for private repository. Please:"
+                "\n\nDownload failed. If you see a 401/403 error, accept the model license on Hugging Face or authenticate:"
                 "\n1. Install huggingface-cli: uv add huggingface_hub[cli]"
                 "\n2. Login: huggingface-cli login"
                 "\n3. Or set token: export HUGGINGFACE_HUB_TOKEN='your_token'"

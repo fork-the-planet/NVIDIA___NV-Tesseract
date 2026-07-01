@@ -890,7 +890,9 @@ def download_model_weights(
         Exception: If the download fails (e.g., due to missing authentication).
 
     Note:
-        If the repository is gated or private you must authenticate first:
+        Weights are published on the Hugging Face repository and download
+        without authentication. If a download fails with 401/403, accept the
+        model license on the repo page or authenticate first:
             1. Install the CLI:  `uv add huggingface_hub[cli]`  (or `pip install huggingface_hub[cli]`)
             2. Login:            `huggingface-cli login`
             3. Or set a token:   `export HUGGINGFACE_HUB_TOKEN='your_token'`
@@ -941,9 +943,9 @@ def download_model_weights(
 
     except Exception as e:
         error_msg = f"Failed to download model weights from {repo_id}: {e}"
-        if "401" in str(e) or "403" in str(e) or "gated" in str(e).lower():
+        if "401" in str(e) or "403" in str(e):
             error_msg += (
-                "\n\nAuthentication required for this repository. Please:"
+                "\n\nDownload failed. Accept the model license on Hugging Face or authenticate:"
                 "\n  1. Install huggingface-cli: `uv add huggingface_hub[cli]`"
                 "\n  2. Login:                  `huggingface-cli login`"
                 "\n  3. Or set a token:         `export HUGGINGFACE_HUB_TOKEN='your_token'`"

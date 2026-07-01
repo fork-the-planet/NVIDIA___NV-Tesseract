@@ -9,10 +9,9 @@ This example demonstrates:
 1. Auto-downloading model weights from Hugging Face (on first run)
 2. Standard forecasting mode
 3. DARR mode (context-enhanced forecasting)
-4. Interpretability mode (lag x horizon attributions, JSON + PDF report)
+4. Interpretability mode (forecast explanations, JSON + PDF report)
 
-Make sure you're authenticated with Hugging Face for the private repo:
-    huggingface-cli login
+Model weights download automatically from the public Hugging Face repo on first run.
 """
 
 import os
