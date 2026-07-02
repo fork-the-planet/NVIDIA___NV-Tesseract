@@ -264,7 +264,7 @@ results = perform_anomaly_analysis_with_diffusion(
 ## Python Dependencies
 
 Core dependencies (see `pyproject.toml` for exact versions):
-- PyTorch (with CUDA support if GPU available)
+- `torch>=2.7.0` - Deep learning framework (with CUDA support if GPU available)
 - NumPy, Pandas, SciPy
 - scikit-learn (for PCA and normalization)
 - PyYAML (for configuration files)
