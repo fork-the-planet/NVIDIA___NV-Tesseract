@@ -1505,7 +1505,6 @@ def perform_forecasting(
     timestamp_column: str = "timestamp",
     target_column: str = "target",
     context_df: pd.DataFrame | None = None,  # Optional context DataFrame for DARR mode
-    return_all_channels: bool = False,  # When True, emit one {col}_forecast per feature column
     # Model configuration - Replace with your own paths for the weights and standardizer
     standardizer_pkl: str = "standardizer.pkl",
     ckpt: str = DEFAULT_CHECKPOINT_NAME,
@@ -1539,12 +1538,20 @@ def perform_forecasting(
     interpretability_dataset_name: str | None = None,
     n_lags: int = 128,
     softmax_tau: float = 1.0,
+    # Output configuration
+    return_all_channels: bool = False,  # When True, emit one {col}_forecast per feature column
 ) -> pd.DataFrame:
     """
     Perform time series forecasting using NV-Tesseract with optional context-enhanced mode (DARR).
     Supports autoregressive forecasting for horizons beyond the model's native capability.
 
     ALWAYS uses InferenceOnlyDataset - only requires seq_len rows for inference.
+
+    When ``return_all_channels=True``, the returned DataFrame contains one
+    ``{column}_forecast`` column per processed channel (target column first,
+    then the remaining numeric feature columns) instead of only
+    ``{target_column}_forecast``. Not supported with ``interpretability=True``
+    (raises ``ValueError``).
     """
     # Set model_horizon to forecast_horizon if not specified
     if model_horizon is None:
@@ -1567,6 +1574,15 @@ def perform_forecasting(
     # context windows for shorter requests while retaining the full retrieval
     # trajectory whenever callers ask for a longer forecast.
     darr_context_horizon = max(model_horizon, forecast_horizon)
+
+    # return_all_channels is not supported with interpretability: that path
+    # returns an explanation-aligned target forecast before the all-channel
+    # output branch runs. Fail loudly instead of silently ignoring the flag.
+    if return_all_channels and interpretability:
+        raise ValueError(
+            "return_all_channels=True is not supported with interpretability=True; "
+            "interpretability reports are generated for the target column only"
+        )
 
     # Input validation
     if df is None or df.empty:
@@ -1611,6 +1627,17 @@ def perform_forecasting(
     if target_column in numeric_columns:
         numeric_columns.remove(target_column)
     columns_to_process = [target_column] + numeric_columns
+
+    # return_all_channels emits one {column}_forecast per channel; reject a
+    # timestamp column name that would collide with one of them, since the
+    # collision would silently overwrite the timestamp column in the output.
+    if return_all_channels:
+        colliding = [c for c in columns_to_process if f"{c}_forecast" == timestamp_column]
+        if colliding:
+            raise ValueError(
+                f"timestamp_column {timestamp_column!r} collides with the forecast column "
+                f"emitted for input column {colliding[0]!r}; rename one of them"
+            )
 
     # Fill NaN values with zeros for all numeric columns
     for col in columns_to_process:
@@ -1907,10 +1934,6 @@ def perform_forecasting(
         # Reshape back to [B, C, H]
         P_orig_reshaped = P_orig.reshape(B * H, C).reshape(B, H, C).transpose(0, 2, 1)
 
-        # Build prediction timestamps and values for future rows only
-        all_timestamps = []
-        all_predictions = []
-
         # Infer frequency from timestamp column
         time_diffs = working_df[timestamp_column].diff().dropna()
         if len(time_diffs) > 0:
@@ -1923,32 +1946,18 @@ def perform_forecasting(
             start=last_input_time + inferred_freq, periods=forecast_horizon, freq=inferred_freq
         )
 
-        if return_all_channels:
-            # Multivariate output: emit one {col}_forecast per feature channel that
-            # the backbone already predicted in a single forward pass. The channel
-            # order matches `columns_to_process` (target_column first, then sorted
-            # numeric features). This unlocks ~10x latency improvement for use
-            # cases that need V-channel forecasts (vs. looping over the SDK V times).
-            if P_orig_reshaped.size == 0:
-                result_df = pd.DataFrame(columns=[timestamp_column] + [f"{c}_forecast" for c in columns_to_process[:C]])
-            else:
-                # P_orig_reshaped shape: [B, C, H]. Take the first batch's all-channel
-                # forecast (single-window prediction, the common inference case).
-                cols = {timestamp_column: pd.to_datetime(forecast_timestamps.tolist())}
-                for ch_idx, ch_name in enumerate(columns_to_process[:C]):
-                    cols[f"{ch_name}_forecast"] = P_orig_reshaped[0, ch_idx, :forecast_horizon]
-                result_df = pd.DataFrame(cols)
-        else:
-            forecast_values = P_orig[:forecast_horizon, 0]
-            all_timestamps.extend(forecast_timestamps.tolist())
-            all_predictions.extend(forecast_values.tolist())
-
-            if all_timestamps:
-                result_df = pd.DataFrame(
-                    {timestamp_column: pd.to_datetime(all_timestamps), f"{target_column}_forecast": all_predictions}
-                )
-            else:
-                result_df = pd.DataFrame(columns=[timestamp_column, f"{target_column}_forecast"])
+        # Emit the target channel only (default), or one {column}_forecast per
+        # processed channel when return_all_channels=True. P_orig_reshaped is
+        # [B, C, H] with B == 1 (single inference window) and channels ordered
+        # as columns_to_process (target column first, then the remaining
+        # numeric features in input-column order). The backbone predicts every
+        # channel anyway, so emitting them all avoids re-running the SDK once
+        # per column (V calls -> 1) for multivariate use cases.
+        output_channels = columns_to_process if return_all_channels else [target_column]
+        cols = {timestamp_column: forecast_timestamps}
+        for ch_idx, channel_name in enumerate(output_channels):
+            cols[f"{channel_name}_forecast"] = P_orig_reshaped[0, ch_idx, :forecast_horizon].tolist()
+        result_df = pd.DataFrame(cols)
 
         # Save predictions if requested
         if save_preds:
@@ -1959,12 +1968,11 @@ def perform_forecasting(
             logger.info("%s", "\n" + "=" * 60)
             logger.info("DARR Mode Results")
             logger.info("%s", "=" * 60)
-            logger.info("Added column: %s_forecast", target_column)
         else:
             logger.info("%s", "\n" + "=" * 60)
             logger.info("Results")
             logger.info("%s", "=" * 60)
-            logger.info("Added column: %s_forecast", target_column)
+        logger.info("Added columns: %s", ", ".join(f"{c}_forecast" for c in output_channels))
 
         return result_df
 
