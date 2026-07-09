@@ -178,6 +178,9 @@ perform_forecasting(
     interpretability_dataset_name: Optional[str] = None,
     n_lags: int = 128,
     softmax_tau: float = 1.0,
+
+    # Multichannel output
+    return_all_channels: bool = False,
 ) -> pd.DataFrame
 ```
 
@@ -206,6 +209,7 @@ perform_forecasting(
 | `interpretability_dataset_name` | Free-form label embedded in the JSON metadata and the PDF cover page |
 | `n_lags` | Number of past steps the lag-attribution matrix resolves (default `128`) |
 | `softmax_tau` | Temperature applied when softmaxing scores into per-horizon attribution |
+| `return_all_channels` | When `True`, the result contains one `{column}_forecast` column per processed channel (target column first, then the remaining numeric features) instead of only `{target_column}_forecast`. Not supported with `interpretability=True` (raises `ValueError`) |
 
 ## Preprocessing expectations
 
@@ -220,12 +224,15 @@ perform_forecasting(
 - **DARR mode**: Returns hybrid predictions in `{target_column}_forecast` (direct and kNN components are computed internally).
 - **Interpretability mode**: Returns the explanation-aligned forecast in `{target_column}_forecast` and writes the artifact bundle to `<interpretability_out_dir>/run_<UTC>/`.
 
+With `return_all_channels=True`, the single `{target_column}_forecast` column is replaced by one `{column}_forecast` column per processed channel (target column first, then the remaining numeric features in input-column order). Each forward pass already predicts every channel, so this avoids re-running the SDK once per column when downstream code needs multivariate forecasts. Autoregressive extension (`forecast_horizon > model_horizon`) and DARR blending apply to every channel the same way they apply to the target column; in DARR mode with mismatched input/context columns, only the aligned common columns are forecast (see Column Mismatch Handling).
+
 ### Output DataFrame structure
 
 | Column | Description |
 |--------|-------------|
 | `{timestamp_column}` | Forecasted timestamps starting after the last input timestamp |
 | `{target_column}_forecast` | Predicted values for the forecast horizon |
+| `{column}_forecast` | (Only with `return_all_channels=True`) Predicted values for each additional numeric feature channel |
 
 ### Interpretability artifact bundle
 
