@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
@@ -48,6 +49,19 @@ class ChannelIndexedModel(DummyModel):
         return SimpleNamespace(forecast=forecast)
 
 
+class LastValueModel(DummyModel):
+    """DummyModel variant that repeats each channel's last observed value.
+
+    Makes the direct-prediction path sensitive to the channel layout of the
+    (rewritten) input CSV: each forecast channel reproduces the constant of
+    the input channel it was built from.
+    """
+
+    def __call__(self, x_enc: torch.Tensor, input_mask: torch.Tensor):
+        forecast = x_enc[:, :, -1:].repeat(1, 1, self.model_horizon)
+        return SimpleNamespace(forecast=forecast)
+
+
 @pytest.fixture(autouse=True)
 def patch_external_dependencies(monkeypatch):
     build_calls = []
@@ -81,6 +95,25 @@ def make_timeseries(num_rows: int = 10) -> pd.DataFrame:
             "feature": np.linspace(0.0, 1.0, num_rows, dtype=np.float32),
         }
     )
+
+
+def make_constant_feature_df(num_rows: int, feature_values: dict[str, float]) -> pd.DataFrame:
+    """Create a timeseries DataFrame whose feature columns are constants.
+
+    With uniform stub embeddings, the kNN retrieval forecast is the mean of the
+    context continuations, so each forecast channel reproduces the constant of
+    the context channel it was built from — which makes channel misalignment
+    observable as a wrong constant in the output. Column order follows the
+    insertion order of ``feature_values``.
+    """
+    timestamps = pd.date_range("2024-01-01", periods=num_rows, freq="h")
+    data = {
+        "timestamp": timestamps,
+        "target": np.zeros(num_rows, dtype=np.float32),
+    }
+    for name, value in feature_values.items():
+        data[name] = np.full(num_rows, value, dtype=np.float32)
+    return pd.DataFrame(data)
 
 
 def make_timeseries_with_columns(num_rows: int = 10, columns: list[str] | None = None) -> pd.DataFrame:
@@ -1033,3 +1066,119 @@ def test_perform_forecasting_darr_mode_column_alignment_with_autoregression():
 
     assert len(result) == 6
     assert result["target_forecast"].notna().all()
+
+
+def test_perform_forecasting_darr_mode_same_columns_different_order(caplog):
+    """An order-only difference must trigger realignment of the context CSV.
+
+    The target channel is first in both layouts, so this test observes the
+    realignment through the warning log; the value-level alignment is covered
+    by the return_all_channels tests below.
+    """
+    df = make_constant_feature_df(12, {"f1": 10.0, "f2": 20.0})
+    context_df = make_constant_feature_df(12, {"f2": 20.0, "f1": 10.0})
+
+    with caplog.at_level(logging.WARNING):
+        result = forecasting.perform_forecasting(
+            df,
+            seq_len=5,
+            forecast_horizon=3,
+            model_horizon=3,
+            context_df=context_df,
+            alpha=0.0,  # pure kNN: forecasts reproduce the context channel constants
+            standardizer_pkl="fake_std.pkl",
+            ckpt="fake_ckpt.pt",
+            seed=42,
+        )
+
+    assert len(result) == 3
+    assert result["target_forecast"].tolist() == pytest.approx([0.0, 0.0, 0.0])
+    # A set-based comparison would treat the two layouts as identical and skip
+    # realignment silently; the order-only warning proves the branch fired.
+    assert any("same numeric columns in a different order" in rec.getMessage() for rec in caplog.records)
+
+
+def test_perform_forecasting_darr_mode_different_order_return_all_channels_aligned():
+    """With return_all_channels=True, every output column must carry the value of
+    its own channel even when the context lists the same columns in another order."""
+    df = make_constant_feature_df(12, {"f1": 10.0, "f2": 20.0})
+    context_df = make_constant_feature_df(12, {"f2": 20.0, "f1": 10.0})
+
+    result = forecasting.perform_forecasting(
+        df,
+        seq_len=5,
+        forecast_horizon=3,
+        model_horizon=3,
+        context_df=context_df,
+        alpha=0.0,  # pure kNN: forecasts reproduce the context channel constants
+        standardizer_pkl="fake_std.pkl",
+        ckpt="fake_ckpt.pt",
+        seed=42,
+        return_all_channels=True,
+    )
+
+    assert list(result.columns) == ["timestamp", "target_forecast", "f1_forecast", "f2_forecast"]
+    # A channel mix-up would surface the other channel's constant here.
+    assert result["f1_forecast"].tolist() == pytest.approx([10.0, 10.0, 10.0])
+    assert result["f2_forecast"].tolist() == pytest.approx([20.0, 20.0, 20.0])
+
+
+def test_perform_forecasting_darr_mode_column_mismatch_uses_input_order_common_subset():
+    """Missing/extra context features fall back to the aligned common subset,
+    anchored to the input-DataFrame column order (not sorted order)."""
+    # Input feature order [zz, beta, alpha] differs from sorted order; the
+    # context is missing `zz` and lists the common features in another order.
+    df = make_constant_feature_df(12, {"zz": 30.0, "beta": 20.0, "alpha": 10.0})
+    context_df = make_constant_feature_df(12, {"alpha": 10.0, "beta": 20.0})
+
+    result = forecasting.perform_forecasting(
+        df,
+        seq_len=5,
+        forecast_horizon=3,
+        model_horizon=3,
+        context_df=context_df,
+        alpha=0.0,  # pure kNN: forecasts reproduce the context channel constants
+        standardizer_pkl="fake_std.pkl",
+        ckpt="fake_ckpt.pt",
+        seed=42,
+        return_all_channels=True,
+    )
+
+    # Only the aligned common subset survives, in input-DataFrame order.
+    assert list(result.columns) == ["timestamp", "target_forecast", "beta_forecast", "alpha_forecast"]
+    assert result["beta_forecast"].tolist() == pytest.approx([20.0, 20.0, 20.0])
+    assert result["alpha_forecast"].tolist() == pytest.approx([10.0, 10.0, 10.0])
+
+
+def test_perform_forecasting_darr_mode_column_mismatch_direct_predictions_aligned(monkeypatch):
+    """With alpha=1.0 (pure direct) the forecasts come from the rewritten input
+    CSV, so this guards the main-CSV side of the canonical-order rewrite (the
+    kNN-side tests above run with alpha=0.0 and cannot observe it)."""
+    monkeypatch.setattr(
+        forecasting,
+        "build_model",
+        lambda *, forecast_horizon, **kwargs: LastValueModel(model_horizon=forecast_horizon),
+    )
+    forecasting.clear_model_cache()
+
+    df = make_constant_feature_df(12, {"zz": 30.0, "beta": 20.0, "alpha": 10.0})
+    context_df = make_constant_feature_df(12, {"alpha": 10.0, "beta": 20.0})
+
+    result = forecasting.perform_forecasting(
+        df,
+        seq_len=5,
+        forecast_horizon=3,
+        model_horizon=3,
+        context_df=context_df,
+        alpha=1.0,  # pure direct: forecasts reproduce the input channel constants
+        standardizer_pkl="fake_std.pkl",
+        ckpt="fake_ckpt.pt",
+        seed=42,
+        return_all_channels=True,
+    )
+
+    assert list(result.columns) == ["timestamp", "target_forecast", "beta_forecast", "alpha_forecast"]
+    # If the rewritten input CSV used a different order than the output naming,
+    # each column would carry the other channel's constant.
+    assert result["beta_forecast"].tolist() == pytest.approx([20.0, 20.0, 20.0])
+    assert result["alpha_forecast"].tolist() == pytest.approx([10.0, 10.0, 10.0])

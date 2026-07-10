@@ -239,6 +239,7 @@ perform_forecasting(
 - Timestamp column must be parseable by pandas and free of NULLs.
 - Target column must be numeric; NULLs are filled with zeros.
 - All numeric features are automatically included; NULLs become zeros.
+- Numeric feature columns should match the set and order the checkpoint/standardizer was trained with; a different order silently misattributes forecasts, and a different column count fails at standardization with a broadcasting error.
 - Input length must be at least `seq_len`; otherwise `ValueError` is raised.
 
 ## Outputs
@@ -248,6 +249,8 @@ perform_forecasting(
 - **Interpretability mode**: Returns the explanation-aligned forecast in `{target_column}_forecast` and writes the artifact bundle to `<interpretability_out_dir>/run_<UTC>/`.
 
 With `return_all_channels=True`, the single `{target_column}_forecast` column is replaced by one `{column}_forecast` column per processed channel (target column first, then the remaining numeric features in input-column order). Each forward pass already predicts every channel, so this avoids re-running the SDK once per column when downstream code needs multivariate forecasts. Autoregressive extension (`forecast_horizon > model_horizon`) and DARR blending apply to every channel the same way they apply to the target column; in DARR mode with mismatched input/context columns, only the aligned common columns are forecast (see Column Mismatch Handling).
+
+> **Channel order matters.** The checkpoint and standardizer are trained against a specific channel layout. At inference time the numeric columns of the input DataFrame should match the training-time set and order. With the same columns in a different order the model still runs, but the forecasts can be semantically wrong — especially visible with `return_all_channels=True`, where every channel becomes an output column. With extra or missing numeric columns the channel count no longer matches the standardizer, and the call fails at standardization with a broadcasting error before inference runs.
 
 ### Output DataFrame structure
 
@@ -313,13 +316,14 @@ The SDK automatically detects and handles column mismatches between input and co
 Warning: Column mismatch detected between input and context datasets
   Input dataset columns: ['HUFL', 'HULL', 'MUFL', 'MULL', 'LUFL', 'OT']
   Context dataset columns: ['HULL', 'MULL', 'LUFL']
-  Common columns: ['HULL', 'MULL', 'LUFL']
+  Common columns (input order): ['HULL', 'MULL', 'LUFL']
   Using only common columns for consistent predictions: ['HULL', 'MULL', 'LUFL']
 ```
 
 **Behavior**:
 - **Automatic detection**: Identifies when datasets have different feature sets
-- **Intelligent alignment**: Uses intersection of feature columns for consistent shapes
+- **Order-sensitive alignment**: Realignment also triggers when both datasets contain the same columns in a different order — otherwise the direct and kNN predictions would blend mismatched channels
+- **One canonical order**: Both temporary datasets are rewritten with the common feature columns in input-DataFrame order (target column first), so the caller-facing channel layout is preserved for the channels that remain
 - **Clear warnings**: Reports what columns are being used and why
 - **Graceful fallback**: Prevents cryptic NumPy broadcasting errors
 
