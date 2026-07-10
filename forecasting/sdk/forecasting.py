@@ -341,6 +341,14 @@ def l2_normalize(a: np.ndarray, eps: float = 1e-12) -> np.ndarray:
     return a / np.maximum(n, eps)
 
 
+def _create_temp_csv_path(prefix: str) -> str:
+    """Return an exclusively created temporary CSV path for one forecasting call."""
+    fd, path = tempfile.mkstemp(prefix=prefix, suffix=".csv")
+    # pandas writes by path; keep the file but release mkstemp's creator handle.
+    os.close(fd)
+    return path
+
+
 @torch.no_grad()
 def embed_batch(model, x_enc, input_mask):
     """Generate embeddings for a batch"""
@@ -1685,9 +1693,9 @@ def perform_forecasting(
     temp_context_csv = None
 
     try:
-        # Create temporary CSV from DataFrame for processing
-        temp_dir = tempfile.gettempdir()
-        temp_test_csv = os.path.join(temp_dir, f"temp_test_{os.getpid()}.csv")
+        # Create a unique CSV for this invocation. PID-only names collide when
+        # multiple requests run concurrently in one service process.
+        temp_test_csv = _create_temp_csv_path("nv_tesseract_test_")
 
         # Save only the necessary columns (timestamp + value columns)
         csv_df = working_df[[timestamp_column] + columns_to_process].copy()
@@ -1697,7 +1705,7 @@ def perform_forecasting(
 
         # Handle context DataFrame if provided for DARR mode
         if context_df is not None:
-            temp_context_csv = os.path.join(temp_dir, f"temp_context_{os.getpid()}.csv")
+            temp_context_csv = _create_temp_csv_path("nv_tesseract_context_")
 
             # Validate context DataFrame columns
             if timestamp_column not in context_df.columns:
@@ -1978,7 +1986,6 @@ def perform_forecasting(
 
     finally:
         # Clean up temporary files
-        if temp_test_csv and os.path.exists(temp_test_csv):
-            Path(temp_test_csv).unlink()
-        if temp_context_csv and os.path.exists(temp_context_csv):
-            Path(temp_context_csv).unlink()
+        for temp_csv in (temp_test_csv, temp_context_csv):
+            if temp_csv:
+                Path(temp_csv).unlink(missing_ok=True)

@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import numpy as np
@@ -115,6 +117,76 @@ def test_perform_forecasting_generates_forecast_when_horizon_exceeds_model_horiz
     assert "target_forecast" in result.columns
     assert len(result) == 3
     assert result["target_forecast"].tolist() == [1.0, 1.0, 1.0]
+
+
+def test_perform_forecasting_uses_distinct_temp_csvs_for_concurrent_calls(monkeypatch):
+    """Same-process calls must not select the same temporary input path."""
+
+    class StopAfterTempCsvError(RuntimeError):
+        pass
+
+    paths = []
+    paths_lock = threading.Lock()
+    both_calls_reached_csv = threading.Barrier(2)
+
+    def capture_temp_csv(self, path, *args: object, **kwargs: object):
+        with paths_lock:
+            paths.append(str(path))
+        both_calls_reached_csv.wait(timeout=5)
+        raise StopAfterTempCsvError
+
+    def invoke(_):
+        with pytest.raises(StopAfterTempCsvError):
+            forecasting.perform_forecasting(
+                make_timeseries(num_rows=10),
+                seq_len=5,
+                forecast_horizon=2,
+                model_horizon=2,
+                standardizer_pkl="fake_std.pkl",
+                ckpt="fake_ckpt.pt",
+            )
+
+    monkeypatch.setattr(pd.DataFrame, "to_csv", capture_temp_csv)
+    monkeypatch.setattr(
+        forecasting,
+        "download_model_weights",
+        lambda standardizer_pkl, ckpt: (standardizer_pkl, ckpt),
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        list(executor.map(invoke, range(2)))
+
+    assert len(paths) == 2
+    assert len(set(paths)) == 2
+
+
+@pytest.mark.parametrize("with_context, expected_temp_files", [(False, 1), (True, 2)])
+def test_perform_forecasting_uses_and_cleans_owned_temp_csvs(monkeypatch, tmp_path, with_context, expected_temp_files):
+    """Standard and DARR calls clean up every unique CSV allocated for them."""
+    created_paths = []
+
+    def create_temp_csv_path(prefix: str) -> str:
+        path = tmp_path / f"{prefix}{len(created_paths)}.csv"
+        path.touch()
+        created_paths.append(path)
+        return str(path)
+
+    monkeypatch.setattr(forecasting, "_create_temp_csv_path", create_temp_csv_path)
+
+    result = forecasting.perform_forecasting(
+        make_timeseries(num_rows=10),
+        context_df=make_timeseries(num_rows=10) if with_context else None,
+        seq_len=5,
+        forecast_horizon=2,
+        model_horizon=2,
+        standardizer_pkl="fake_std.pkl",
+        ckpt="fake_ckpt.pt",
+        num_workers=0,
+    )
+
+    assert len(result) == 2
+    assert len(created_paths) == expected_temp_files
+    assert all(not path.exists() for path in created_paths)
 
 
 def test_perform_forecasting_uses_cross_channel_model_by_default(patch_external_dependencies):
