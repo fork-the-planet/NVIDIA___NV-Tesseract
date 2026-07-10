@@ -160,7 +160,7 @@ forecasting/
 - vendored `backbone.py` - forecasting backbone implementation bundled in this package
 - `pandas>=2.1.0` - Data manipulation
 - `numpy>=1.24.0` - Numerical computing
-- `torch>=2.0.0` - Deep learning framework
+- `torch>=2.7.0` - Deep learning framework
 - `tqdm>=4.65.0` - Progress bars
 - `huggingface_hub>=0.17.0` - For downloading model weights
 
@@ -169,7 +169,6 @@ forecasting/
 - `ruff>=0.8.0` - Linting and formatting
 
 ### Optional Dependencies
-- `mac-mps` group: Optimized PyTorch for Apple Silicon
 - `matplotlib` - Required only for the interpretability PDF report and heatmap PNG; JSON-only interpretability output works without it
 
 ### Note on Dependencies

@@ -64,7 +64,7 @@ def test_training_and_evaluation_present_the_same_conditioning_scale_to_denoiser
     side_info = torch.empty(1)
     recorder = RecordingDiffModel()
     model = _bare_model()
-    model.diffmodel = recorder
+    model.add_module("diffmodel", recorder)
 
     model.calc_loss(
         observed_data,

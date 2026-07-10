@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import numpy as np
@@ -30,6 +32,20 @@ class DummyModel:
 
     def load_state_dict(self, state: dict, strict: bool = False):
         return
+
+
+class ChannelIndexedModel(DummyModel):
+    """DummyModel variant whose forecast value equals the channel index.
+
+    Makes channel/column mix-ups observable: every output column must carry
+    the value of the channel it claims to represent.
+    """
+
+    def __call__(self, x_enc: torch.Tensor, input_mask: torch.Tensor):
+        batch_size, channels, _ = x_enc.shape
+        forecast = torch.arange(channels, dtype=torch.float32).reshape(1, channels, 1)
+        forecast = forecast.repeat(batch_size, 1, self.model_horizon).to(x_enc.device)
+        return SimpleNamespace(forecast=forecast)
 
 
 @pytest.fixture(autouse=True)
@@ -103,6 +119,76 @@ def test_perform_forecasting_generates_forecast_when_horizon_exceeds_model_horiz
     assert result["target_forecast"].tolist() == [1.0, 1.0, 1.0]
 
 
+def test_perform_forecasting_uses_distinct_temp_csvs_for_concurrent_calls(monkeypatch):
+    """Same-process calls must not select the same temporary input path."""
+
+    class StopAfterTempCsvError(RuntimeError):
+        pass
+
+    paths = []
+    paths_lock = threading.Lock()
+    both_calls_reached_csv = threading.Barrier(2)
+
+    def capture_temp_csv(self, path, *args: object, **kwargs: object):
+        with paths_lock:
+            paths.append(str(path))
+        both_calls_reached_csv.wait(timeout=5)
+        raise StopAfterTempCsvError
+
+    def invoke(_):
+        with pytest.raises(StopAfterTempCsvError):
+            forecasting.perform_forecasting(
+                make_timeseries(num_rows=10),
+                seq_len=5,
+                forecast_horizon=2,
+                model_horizon=2,
+                standardizer_pkl="fake_std.pkl",
+                ckpt="fake_ckpt.pt",
+            )
+
+    monkeypatch.setattr(pd.DataFrame, "to_csv", capture_temp_csv)
+    monkeypatch.setattr(
+        forecasting,
+        "download_model_weights",
+        lambda standardizer_pkl, ckpt: (standardizer_pkl, ckpt),
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        list(executor.map(invoke, range(2)))
+
+    assert len(paths) == 2
+    assert len(set(paths)) == 2
+
+
+@pytest.mark.parametrize("with_context, expected_temp_files", [(False, 1), (True, 2)])
+def test_perform_forecasting_uses_and_cleans_owned_temp_csvs(monkeypatch, tmp_path, with_context, expected_temp_files):
+    """Standard and DARR calls clean up every unique CSV allocated for them."""
+    created_paths = []
+
+    def create_temp_csv_path(prefix: str) -> str:
+        path = tmp_path / f"{prefix}{len(created_paths)}.csv"
+        path.touch()
+        created_paths.append(path)
+        return str(path)
+
+    monkeypatch.setattr(forecasting, "_create_temp_csv_path", create_temp_csv_path)
+
+    result = forecasting.perform_forecasting(
+        make_timeseries(num_rows=10),
+        context_df=make_timeseries(num_rows=10) if with_context else None,
+        seq_len=5,
+        forecast_horizon=2,
+        model_horizon=2,
+        standardizer_pkl="fake_std.pkl",
+        ckpt="fake_ckpt.pt",
+        num_workers=0,
+    )
+
+    assert len(result) == 2
+    assert len(created_paths) == expected_temp_files
+    assert all(not path.exists() for path in created_paths)
+
+
 def test_perform_forecasting_uses_cross_channel_model_by_default(patch_external_dependencies):
     df = make_timeseries(num_rows=10)
     forecasting.perform_forecasting(
@@ -139,6 +225,106 @@ def test_perform_forecasting_allows_cross_channel_configuration_override(patch_e
     assert build_kwargs["use_cross_channel"] is False
     assert build_kwargs["cross_channel_heads"] == 4
     assert build_kwargs["cross_channel_dropout"] == 0.25
+
+
+def test_perform_forecasting_return_all_channels_emits_per_channel_forecasts(monkeypatch):
+    monkeypatch.setattr(
+        forecasting,
+        "build_model",
+        lambda *, forecast_horizon, **kwargs: ChannelIndexedModel(model_horizon=forecast_horizon),
+    )
+    forecasting.clear_model_cache()
+
+    df = make_timeseries(num_rows=10)
+    result = forecasting.perform_forecasting(
+        df,
+        seq_len=5,
+        forecast_horizon=3,
+        model_horizon=3,
+        standardizer_pkl="fake_std.pkl",
+        ckpt="fake_ckpt.pt",
+        seed=42,
+        return_all_channels=True,
+    )
+
+    # Channel order matches columns_to_process: target column first, then the
+    # remaining numeric features in input-column order.
+    assert list(result.columns) == ["timestamp", "target_forecast", "feature_forecast"]
+    assert len(result) == 3
+    # The stub model encodes the channel index in the forecast value, so each
+    # column must carry its own channel's value (a mix-up fails here).
+    assert result["target_forecast"].tolist() == [0.0, 0.0, 0.0]
+    assert result["feature_forecast"].tolist() == [1.0, 1.0, 1.0]
+
+
+def test_perform_forecasting_return_all_channels_with_autoregressive_horizon():
+    df = make_timeseries(num_rows=10)
+    result = forecasting.perform_forecasting(
+        df,
+        seq_len=5,
+        forecast_horizon=6,
+        model_horizon=2,
+        standardizer_pkl="fake_std.pkl",
+        ckpt="fake_ckpt.pt",
+        seed=42,
+        return_all_channels=True,
+    )
+
+    assert list(result.columns) == ["timestamp", "target_forecast", "feature_forecast"]
+    assert len(result) == 6
+    assert result["target_forecast"].notna().all()
+    assert result["feature_forecast"].notna().all()
+
+
+def test_perform_forecasting_return_all_channels_darr_mode():
+    df = make_timeseries(num_rows=12)
+    context_df = make_timeseries(num_rows=12)
+    result = forecasting.perform_forecasting(
+        df,
+        seq_len=5,
+        forecast_horizon=3,
+        model_horizon=3,
+        context_df=context_df,
+        standardizer_pkl="fake_std.pkl",
+        ckpt="fake_ckpt.pt",
+        seed=42,
+        return_all_channels=True,
+    )
+
+    assert list(result.columns) == ["timestamp", "target_forecast", "feature_forecast"]
+    assert len(result) == 3
+    assert result["target_forecast"].notna().all()
+    assert result["feature_forecast"].notna().all()
+
+
+def test_perform_forecasting_return_all_channels_rejects_interpretability():
+    df = make_timeseries(num_rows=10)
+    with pytest.raises(ValueError, match="return_all_channels"):
+        forecasting.perform_forecasting(
+            df,
+            seq_len=5,
+            forecast_horizon=3,
+            model_horizon=3,
+            standardizer_pkl="fake_std.pkl",
+            ckpt="fake_ckpt.pt",
+            return_all_channels=True,
+            interpretability=True,
+        )
+
+
+def test_perform_forecasting_return_all_channels_rejects_timestamp_collision():
+    df = make_timeseries(num_rows=10).rename(columns={"timestamp": "feature_forecast"})
+    with pytest.raises(ValueError, match="collides"):
+        forecasting.perform_forecasting(
+            df,
+            timestamp_column="feature_forecast",
+            seq_len=5,
+            forecast_horizon=3,
+            model_horizon=3,
+            standardizer_pkl="fake_std.pkl",
+            ckpt="fake_ckpt.pt",
+            return_all_channels=True,
+        )
 
 
 def test_perform_forecasting_requires_timestamp_column():
