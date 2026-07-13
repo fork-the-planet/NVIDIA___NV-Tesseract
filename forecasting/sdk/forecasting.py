@@ -902,6 +902,80 @@ def _semantic_flow_page(
     plt.close(fig)
 
 
+def _channel_axis_page(
+    pdf: Any,
+    plt: Any,
+    *,
+    explanation: ForecastExplanation,
+    channel_labels: list[str] | None = None,
+) -> None:
+    """Append one PDF page for the feature-axis (channel x horizon) attribution."""
+    A = getattr(explanation, "channel_horizon_attributions", None)
+    if A is None:
+        return
+    A = np.asarray(A, dtype=np.float32)
+    if A.ndim != 2 or A.shape[0] < 1 or A.shape[1] < 1:
+        return
+    C, H = A.shape
+    labels = channel_labels if (channel_labels and len(channel_labels) == C) else [f"channel_{c}" for c in range(C)]
+    importance = A.sum(axis=1)
+    method = getattr(explanation, "channel_flow_method", None) or "jacobian"
+    resid = getattr(explanation, "channel_flow_residual_ratio_mean", None)
+
+    fig = plt.figure(figsize=(11, 8.5))
+    fig.text(0.5, 0.95, "Feature-axis attribution (channel x horizon)", ha="center", fontsize=14, fontweight="bold")
+    fig.text(
+        0.06, 0.90,
+        "Which input channel (feature) drives each forecast step. The model's response is\n"
+        "decomposed along the feature axis into per-channel contributions, then aggregated\n"
+        "per horizon. Rows are input channels, columns are forecast steps; brighter = that\n"
+        "channel matters more there.",
+        ha="left", va="top", fontsize=9, color="gray",
+    )
+
+    ax = fig.add_axes((0.08, 0.40, 0.56, 0.42))
+    im = ax.imshow(A, aspect="auto", cmap="viridis", interpolation="nearest")
+    ax.set_xlabel("Forecast horizon (0 = first predicted step)")
+    ax.set_ylabel("Input channel")
+    ax.set_yticks(range(C))
+    ax.set_yticklabels(labels, fontsize=8)
+    xt = np.linspace(0, H - 1, min(12, H), dtype=int)
+    ax.set_xticks(xt)
+    ax.set_xticklabels(xt)
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="Attribution")
+
+    axb = fig.add_axes((0.72, 0.40, 0.22, 0.42))
+    y = np.arange(C)
+    axb.barh(y, importance, color="#1f77b4")
+    axb.set_yticks(y)
+    axb.set_yticklabels([])
+    axb.invert_yaxis()
+    axb.set_title("Channel importance\n(sum over horizons)", fontsize=9)
+    axb.set_xlabel("Total attribution", fontsize=8)
+    axb.tick_params(axis="both", labelsize=7)
+
+    top_c = int(np.argmax(importance))
+    resid_line = (
+        f"  - Estimator: {method}. Jacobian trust ratio (mean residual): {resid:.3f}\n"
+        "    (lower = more reliable first-order split).\n"
+        if resid is not None
+        else f"  - Estimator: {method}.\n"
+    )
+    note = (
+        "How to read this page\n"
+        "---------------------\n"
+        "  - Heatmap cell (channel c, horizon h): share of the forecast at step h\n"
+        "    attributable to input channel c (each horizon column sums to 1 over channels).\n"
+        "  - Right bar: each channel's total attribution summed across horizons.\n"
+        f"  - Most influential channel overall: {labels[top_c]}.\n" + resid_line + "\n"
+        "Full [C x H] values are in explanation.json under feature_axis."
+    )
+    fig.text(0.06, 0.30, note, ha="left", va="top", fontsize=9, family="monospace", color="#333333", linespacing=1.05)
+
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
 def _build_pdf_report(
     pdf_path: Path,
     *,
