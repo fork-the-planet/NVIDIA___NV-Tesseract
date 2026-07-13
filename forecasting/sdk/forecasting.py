@@ -916,6 +916,7 @@ def _build_pdf_report(
     trajectory_report: TrajectoryStabilityReport | None = None,
     context_len: int | None = None,
     forecast_horizon: int | None = None,
+    channel_labels: list[str] | None = None,
 ) -> Path | None:
     """Compose a multi-page PDF with the forecast and attribution heatmap."""
     try:
@@ -971,6 +972,8 @@ def _build_pdf_report(
             "   forecast-vs-history diagnostics.",
             "5. Latent trajectory stability: temporal-smoothness metrics",
             "   over the context window.",
+            "6. Feature-axis attribution: which input channel drives each",
+            "   forecast step (multivariate inputs only).",
         ]
         fig.text(0.08, 0.85, "\n".join(summary), ha="left", va="top", fontsize=10, family="monospace")
         pdf.savefig(fig)
@@ -1201,6 +1204,19 @@ def _build_pdf_report(
             pdf.savefig(fig)
             plt.close(fig)
 
+        # Feature-axis page last (and only for multivariate inputs), matching
+        # its position in the cover summary.
+        if getattr(explanation, "channel_horizon_attributions", None) is not None:
+            try:
+                _channel_axis_page(
+                    pdf,
+                    plt,
+                    explanation=explanation,
+                    channel_labels=channel_labels,
+                )
+            except Exception as e:
+                logger.warning("Feature-axis page skipped: %s", e)
+
     return pdf_path
 
 
@@ -1304,6 +1320,23 @@ def _explanation_to_dict(
         "trajectory_stability": _trajectory_report_to_dict(trajectory_report),
     }
 
+    # Feature-axis (channel) attribution -- only present for multivariate inputs.
+    chan_attrib = getattr(explanation, "channel_horizon_attributions", None)
+    if chan_attrib is not None:
+        feature_axis: dict[str, Any] = {
+            "method": getattr(explanation, "channel_flow_method", None),
+            "channel_horizon_attributions": _array_to_jsonable(np.asarray(chan_attrib)),
+            "residual_ratio_mean": _scalar_to_jsonable(
+                getattr(explanation, "channel_flow_residual_ratio_mean", None)
+            ),
+            "residual_ratio_p95": _scalar_to_jsonable(
+                getattr(explanation, "channel_flow_residual_ratio_p95", None)
+            ),
+        }
+        if include_full_arrays and getattr(explanation, "per_channel_flow", None) is not None:
+            feature_axis["per_channel_flow"] = _array_to_jsonable(np.asarray(explanation.per_channel_flow))
+        explanation_block["feature_axis"] = feature_axis
+
     if include_full_arrays:
         explanation_block["flow_magnitudes"] = _array_to_jsonable(explanation.flow_magnitudes)
         explanation_block["latent_trajectory"] = _array_to_jsonable(explanation.latent_trajectory)
@@ -1351,6 +1384,35 @@ def _save_explanation_json(
     return out_path
 
 
+def _save_channel_coupling_artifacts(
+    run_dir: Path,
+    coupling_matrix: np.ndarray,
+    channel_labels: list[str],
+) -> None:
+    """Write Pass B coupling matrix CSV (and heatmap when matplotlib is available)."""
+    labels = [str(lab) for lab in channel_labels]
+    pd.DataFrame(coupling_matrix, index=labels, columns=labels).to_csv(
+        run_dir / "channel_coupling_matrix.csv"
+    )
+    try:
+        import matplotlib.pyplot as plt
+
+        c = int(coupling_matrix.shape[0])
+        fig, ax = plt.subplots(figsize=(max(6.0, c * 0.45), max(5.0, c * 0.42)))
+        im = ax.imshow(coupling_matrix, aspect="auto", cmap="magma")
+        ax.set_title("Channel coupling matrix (Harsanyi dividends)")
+        ax.set_xticks(range(c))
+        ax.set_yticks(range(c))
+        ax.set_xticklabels(labels, rotation=45, ha="right")
+        ax.set_yticklabels(labels)
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        fig.tight_layout()
+        fig.savefig(run_dir / "channel_coupling_heatmap.png", dpi=150)
+        plt.close(fig)
+    except ImportError:
+        pass
+
+
 def _run_interpretability(
     *,
     model: torch.nn.Module,
@@ -1370,12 +1432,31 @@ def _run_interpretability(
     interpretability_run_name: str | None,
     interpretability_top_k: int,
     dataset_name: str | None,
+    channel_output_aware: bool = False,
+    return_all_channels: bool = False,
+    # v2 channel-axis / coupling params
+    interpretability_channel_axis: bool | None = None,
+    interpretability_coupling: bool | None = None,
+    interpretability_coupling_transitions: int = 16,
+    interpretability_shapley_n_samples: int = 64,
+    interpretability_shapley_baseline: str = "zero",
+    interpretability_transition_batch: int = 8,
+    interpretability_channel_batch_size: int = 64,
+    interpretability_devices: str | None = None,
+    interpretability_parallel_passes: bool = False,
+    interpretability_shapley_workers: int = 0,
+    ckpt: str | None = None,
+    model_name: str = DEFAULT_BACKBONE_NAME,
+    use_cross_channel: bool = True,
+    cross_channel_heads: int = 8,
+    cross_channel_dropout: float = 0.1,
 ) -> tuple[pd.DataFrame, Path]:
     """Generate the lag x horizon explanation, write artifacts, return (forecast_df, run_dir).
 
     The forecast comes from the explanation's ``baseline_forecast`` (single
     forward pass, no autoregressive rollout) so callers should treat it as the
-    interpretability-aligned forecast.
+    interpretability-aligned forecast. When ``return_all_channels=True``, the
+    returned frame contains one forecast column per processed channel.
     """
     if interpretability_output is not None and interpretability_output not in {"json", "pdf"}:
         raise ValueError(f"interpretability_output must be one of None, 'json', 'pdf'; got {interpretability_output!r}")
@@ -1386,18 +1467,115 @@ def _run_interpretability(
     x_context_ct = np.swapaxes(series_lc, 0, 1).copy()
     input_mask_l = np.ones((seq_len,), dtype=np.int64)
 
+    # Feature-axis (channel) attribution only makes sense for multivariate inputs.
+    n_channels = int(x_context_ct.shape[0])
+    # Allow caller to explicitly control channel_axis; default: auto-detect from channel count.
+    if interpretability_channel_axis is not None:
+        channel_axis = bool(interpretability_channel_axis) and n_channels > 1
+    else:
+        channel_axis = n_channels > 1
+    # The target column is always channel 0 of columns_to_process, so output-aware
+    # attribution explains the target's own forecast.
+    output_aware = bool(channel_output_aware) and channel_axis
+    chan_cfg = None
+    if channel_axis:
+        from channel_flow import ChannelFlowConfig
+
+        # The SDK reports the trailing K lag transitions, so restrict the
+        # feature-axis estimator to those transitions. This keeps the artifact
+        # values aligned with lag_horizon_attribution while avoiding hundreds of
+        # unused Jacobian-flow probes for the rest of the 512-step context.
+        lag_count = min(int(n_lags), max(0, int(seq_len) - 1))
+        start = max(0, int(seq_len) - 1 - lag_count)
+        time_indices = tuple(range(start, int(seq_len) - 1))
+
+        # When coupling is requested, use Shapley method for the channel config.
+        run_coupling = bool(interpretability_coupling) if interpretability_coupling is not None else False
+        if run_coupling:
+            chan_cfg = ChannelFlowConfig(
+                method="shapley",
+                shapley_baseline=interpretability_shapley_baseline,  # type: ignore[arg-type]
+                shapley_n_samples=int(interpretability_shapley_n_samples),
+                compute_coupling=True,
+                time_indices=list(time_indices),
+                batch_size=int(interpretability_channel_batch_size),
+                transition_batch=int(interpretability_transition_batch),
+            )
+        else:
+            chan_cfg = ChannelFlowConfig(
+                batch_size=int(interpretability_channel_batch_size),
+                transition_batch=int(interpretability_transition_batch),
+                time_indices=list(time_indices),
+            )
+
     model.eval()
-    explanation = explain_forecast(
-        model,
-        x_context_ct=x_context_ct,
-        input_mask_l=input_mask_l,
-        model_horizon=model_horizon,
-        forecast_horizon=forecast_horizon,
-        device=device,
-        n_lags=n_lags,
-        softmax_tau=softmax_tau,
-        surrogate=False,
+
+    # Optionally dispatch to interpretability_parallel for multi-GPU coupling.
+    use_parallel = (
+        channel_axis
+        and bool(interpretability_coupling)
+        and (bool(interpretability_parallel_passes) or int(interpretability_shapley_workers) >= 2)
     )
+    if use_parallel:
+        from interpretability_parallel import (
+            InterpretabilityPassConfig,
+            run_interpretability_passes,
+        )
+
+        pass_cfg = InterpretabilityPassConfig(
+            seq_len=int(seq_len),
+            forecast_horizon=int(forecast_horizon),
+            model_horizon=int(model_horizon),
+            n_lags=int(n_lags),
+            softmax_tau=float(softmax_tau),
+            coupling_transitions=int(interpretability_coupling_transitions),
+            shapley_n_samples=int(interpretability_shapley_n_samples),
+            shapley_baseline=interpretability_shapley_baseline,
+            transition_batch=int(interpretability_transition_batch),
+            channel_batch_size=int(interpretability_channel_batch_size),
+            devices=interpretability_devices,
+            parallel_passes=bool(interpretability_parallel_passes),
+            shapley_workers=int(interpretability_shapley_workers),
+            run_coupling=True,
+        )
+        pass_result = run_interpretability_passes(
+            x_ct=x_context_ct,
+            input_mask_l=input_mask_l,
+            cfg=pass_cfg,
+            use_channel_axis=True,
+            model=model,
+            device=device,
+            ckpt_path=ckpt,
+            model_name=model_name,
+            use_cross_channel=use_cross_channel,
+            cross_channel_heads=cross_channel_heads,
+            cross_channel_dropout=cross_channel_dropout,
+        )
+        explanation = pass_result.explanation
+        coupling_report = pass_result.coupling_report
+        logger.info(
+            "Interpretability passes done (pass_a=%.1fs, pass_b=%.1fs, parallel=%s)",
+            pass_result.pass_a_seconds,
+            pass_result.pass_b_seconds,
+            pass_result.parallel,
+        )
+    else:
+        coupling_report = None
+        explanation = explain_forecast(
+            model,
+            x_context_ct=x_context_ct,
+            input_mask_l=input_mask_l,
+            model_horizon=model_horizon,
+            forecast_horizon=forecast_horizon,
+            device=device,
+            n_lags=n_lags,
+            softmax_tau=softmax_tau,
+            surrogate=False,
+            channel_axis=channel_axis,
+            chan_cfg=chan_cfg,
+            channel_output_aware=output_aware,
+            channel_target=0 if output_aware else None,
+        )
 
     base_std = explanation.baseline_forecast
     H = base_std.shape[1]
@@ -1413,14 +1591,11 @@ def _run_interpretability(
     last_input_time = working_df[timestamp_column].iloc[-1]
     forecast_timestamps = pd.date_range(start=last_input_time + inferred_freq, periods=H, freq=inferred_freq)
 
-    target_idx = 0
-    forecast_values = pred_orig_lc[:, target_idx].astype(np.float32)
-    forecast_df = pd.DataFrame(
-        {
-            timestamp_column: pd.to_datetime(forecast_timestamps),
-            f"{target_column}_forecast": forecast_values,
-        }
-    )
+    output_channels = columns_to_process if return_all_channels else [target_column]
+    forecast_cols: dict[str, Any] = {timestamp_column: pd.to_datetime(forecast_timestamps)}
+    for ch_idx, channel_name in enumerate(output_channels):
+        forecast_cols[f"{channel_name}_forecast"] = pred_orig_lc[:, ch_idx].astype(np.float32)
+    forecast_df = pd.DataFrame(forecast_cols)
 
     base_dir = Path(interpretability_out_dir)
     if interpretability_run_name is None:
@@ -1429,6 +1604,19 @@ def _run_interpretability(
     run_dir.mkdir(parents=True, exist_ok=True)
 
     forecast_df.to_csv(run_dir / "forecast.csv", index=False)
+
+    if coupling_report is not None and coupling_report.coupling_matrix is not None:
+        _save_channel_coupling_artifacts(
+            run_dir,
+            np.asarray(coupling_report.coupling_matrix, dtype=np.float32),
+            columns_to_process,
+        )
+        sh_phi = np.asarray(coupling_report.per_channel_flow)
+        sh_finite = np.where(np.isfinite(sh_phi).all(axis=1))[0]
+        if sh_finite.size:
+            sh_df = pd.DataFrame(sh_phi[sh_finite], columns=columns_to_process)
+            sh_df.insert(0, "transition", sh_finite)
+            sh_df.to_csv(run_dir / "per_channel_flow_shapley_finite.csv", index=False)
 
     write_json = interpretability_output in (None, "json")
     write_pdf = interpretability_output in (None, "pdf")
@@ -1546,6 +1734,17 @@ def perform_forecasting(
     interpretability_dataset_name: str | None = None,
     n_lags: int = 128,
     softmax_tau: float = 1.0,
+    # v2 channel-axis interpretability
+    interpretability_channel_axis: bool | None = None,
+    interpretability_coupling: bool | None = None,
+    interpretability_coupling_transitions: int = 16,
+    interpretability_shapley_n_samples: int = 64,
+    interpretability_shapley_baseline: str = "zero",
+    interpretability_transition_batch: int = 8,
+    interpretability_channel_batch_size: int = 64,
+    interpretability_devices: str | None = None,
+    interpretability_parallel_passes: bool = False,
+    interpretability_shapley_workers: int = 0,
     # Output configuration
     return_all_channels: bool = False,  # When True, emit one {col}_forecast per feature column
 ) -> pd.DataFrame:
@@ -1839,6 +2038,21 @@ def perform_forecasting(
                 interpretability_run_name=interpretability_run_name,
                 interpretability_top_k=interpretability_top_k,
                 dataset_name=interpretability_dataset_name,
+                interpretability_channel_axis=interpretability_channel_axis,
+                interpretability_coupling=interpretability_coupling,
+                interpretability_coupling_transitions=interpretability_coupling_transitions,
+                interpretability_shapley_n_samples=interpretability_shapley_n_samples,
+                interpretability_shapley_baseline=interpretability_shapley_baseline,
+                interpretability_transition_batch=interpretability_transition_batch,
+                interpretability_channel_batch_size=interpretability_channel_batch_size,
+                interpretability_devices=interpretability_devices,
+                interpretability_parallel_passes=interpretability_parallel_passes,
+                interpretability_shapley_workers=interpretability_shapley_workers,
+                ckpt=ckpt,
+                model_name=model_name,
+                use_cross_channel=use_cross_channel,
+                cross_channel_heads=cross_channel_heads,
+                cross_channel_dropout=cross_channel_dropout,
             )
             logger.info("Interpretability bundle written to: %s", run_dir)
             if save_preds:
