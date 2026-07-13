@@ -26,6 +26,7 @@ except ImportError:
 
 # Clean absolute imports - package is installed in editable mode
 from backbone.utils.utils import control_randomness
+
 from dataset_longhorizon import (
     CSVLongHorizonSimpleDataset,
     Standardizer,
@@ -902,80 +903,6 @@ def _semantic_flow_page(
     plt.close(fig)
 
 
-def _channel_axis_page(
-    pdf: Any,
-    plt: Any,
-    *,
-    explanation: ForecastExplanation,
-    channel_labels: list[str] | None = None,
-) -> None:
-    """Append one PDF page for the feature-axis (channel x horizon) attribution."""
-    A = getattr(explanation, "channel_horizon_attributions", None)
-    if A is None:
-        return
-    A = np.asarray(A, dtype=np.float32)
-    if A.ndim != 2 or A.shape[0] < 1 or A.shape[1] < 1:
-        return
-    C, H = A.shape
-    labels = channel_labels if (channel_labels and len(channel_labels) == C) else [f"channel_{c}" for c in range(C)]
-    importance = A.sum(axis=1)
-    method = getattr(explanation, "channel_flow_method", None) or "jacobian"
-    resid = getattr(explanation, "channel_flow_residual_ratio_mean", None)
-
-    fig = plt.figure(figsize=(11, 8.5))
-    fig.text(0.5, 0.95, "Feature-axis attribution (channel x horizon)", ha="center", fontsize=14, fontweight="bold")
-    fig.text(
-        0.06, 0.90,
-        "Which input channel (feature) drives each forecast step. The model's response is\n"
-        "decomposed along the feature axis into per-channel contributions, then aggregated\n"
-        "per horizon. Rows are input channels, columns are forecast steps; brighter = that\n"
-        "channel matters more there.",
-        ha="left", va="top", fontsize=9, color="gray",
-    )
-
-    ax = fig.add_axes((0.08, 0.40, 0.56, 0.42))
-    im = ax.imshow(A, aspect="auto", cmap="viridis", interpolation="nearest")
-    ax.set_xlabel("Forecast horizon (0 = first predicted step)")
-    ax.set_ylabel("Input channel")
-    ax.set_yticks(range(C))
-    ax.set_yticklabels(labels, fontsize=8)
-    xt = np.linspace(0, H - 1, min(12, H), dtype=int)
-    ax.set_xticks(xt)
-    ax.set_xticklabels(xt)
-    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="Attribution")
-
-    axb = fig.add_axes((0.72, 0.40, 0.22, 0.42))
-    y = np.arange(C)
-    axb.barh(y, importance, color="#1f77b4")
-    axb.set_yticks(y)
-    axb.set_yticklabels([])
-    axb.invert_yaxis()
-    axb.set_title("Channel importance\n(sum over horizons)", fontsize=9)
-    axb.set_xlabel("Total attribution", fontsize=8)
-    axb.tick_params(axis="both", labelsize=7)
-
-    top_c = int(np.argmax(importance))
-    resid_line = (
-        f"  - Estimator: {method}. Jacobian trust ratio (mean residual): {resid:.3f}\n"
-        "    (lower = more reliable first-order split).\n"
-        if resid is not None
-        else f"  - Estimator: {method}.\n"
-    )
-    note = (
-        "How to read this page\n"
-        "---------------------\n"
-        "  - Heatmap cell (channel c, horizon h): share of the forecast at step h\n"
-        "    attributable to input channel c (each horizon column sums to 1 over channels).\n"
-        "  - Right bar: each channel's total attribution summed across horizons.\n"
-        f"  - Most influential channel overall: {labels[top_c]}.\n" + resid_line + "\n"
-        "Full [C x H] values are in explanation.json under feature_axis."
-    )
-    fig.text(0.06, 0.30, note, ha="left", va="top", fontsize=9, family="monospace", color="#333333", linespacing=1.05)
-
-    pdf.savefig(fig)
-    plt.close(fig)
-
-
 def _build_pdf_report(
     pdf_path: Path,
     *,
@@ -990,7 +917,6 @@ def _build_pdf_report(
     trajectory_report: TrajectoryStabilityReport | None = None,
     context_len: int | None = None,
     forecast_horizon: int | None = None,
-    channel_labels: list[str] | None = None,
 ) -> Path | None:
     """Compose a multi-page PDF with the forecast and attribution heatmap."""
     try:
@@ -1046,8 +972,6 @@ def _build_pdf_report(
             "   forecast-vs-history diagnostics.",
             "5. Latent trajectory stability: temporal-smoothness metrics",
             "   over the context window.",
-            "6. Feature-axis attribution: which input channel drives each",
-            "   forecast step (multivariate inputs only).",
         ]
         fig.text(0.08, 0.85, "\n".join(summary), ha="left", va="top", fontsize=10, family="monospace")
         pdf.savefig(fig)
@@ -1278,19 +1202,6 @@ def _build_pdf_report(
             pdf.savefig(fig)
             plt.close(fig)
 
-        # Feature-axis page last (and only for multivariate inputs), matching
-        # its position in the cover summary.
-        if getattr(explanation, "channel_horizon_attributions", None) is not None:
-            try:
-                _channel_axis_page(
-                    pdf,
-                    plt,
-                    explanation=explanation,
-                    channel_labels=channel_labels,
-                )
-            except Exception as e:
-                logger.warning("Feature-axis page skipped: %s", e)
-
     return pdf_path
 
 
@@ -1394,26 +1305,30 @@ def _explanation_to_dict(
         "trajectory_stability": _trajectory_report_to_dict(trajectory_report),
     }
 
-    # Feature-axis (channel) attribution -- only present for multivariate inputs.
-    chan_attrib = getattr(explanation, "channel_horizon_attributions", None)
-    if chan_attrib is not None:
-        feature_axis: dict[str, Any] = {
-            "method": getattr(explanation, "channel_flow_method", None),
-            "channel_horizon_attributions": _array_to_jsonable(np.asarray(chan_attrib)),
-            "residual_ratio_mean": _scalar_to_jsonable(
-                getattr(explanation, "channel_flow_residual_ratio_mean", None)
-            ),
-            "residual_ratio_p95": _scalar_to_jsonable(
-                getattr(explanation, "channel_flow_residual_ratio_p95", None)
-            ),
-        }
-        if include_full_arrays and getattr(explanation, "per_channel_flow", None) is not None:
-            feature_axis["per_channel_flow"] = _array_to_jsonable(np.asarray(explanation.per_channel_flow))
-        explanation_block["feature_axis"] = feature_axis
-
     if include_full_arrays:
         explanation_block["flow_magnitudes"] = _array_to_jsonable(explanation.flow_magnitudes)
         explanation_block["latent_trajectory"] = _array_to_jsonable(explanation.latent_trajectory)
+
+    if explanation.per_channel_flow is not None:
+        explanation_block["per_channel_flow"] = _array_to_jsonable(explanation.per_channel_flow)
+    if explanation.lag_channel_horizon_attributions is not None:
+        explanation_block["lag_channel_horizon_attributions"] = _array_to_jsonable(
+            explanation.lag_channel_horizon_attributions
+        )
+    if explanation.channel_horizon_attributions is not None:
+        explanation_block["channel_horizon_attributions"] = _array_to_jsonable(
+            explanation.channel_horizon_attributions
+        )
+    if explanation.channel_coupling_matrix is not None:
+        explanation_block["channel_coupling_matrix"] = _array_to_jsonable(
+            explanation.channel_coupling_matrix
+        )
+    if explanation.channel_flow_method is not None:
+        explanation_block["channel_flow_method"] = explanation.channel_flow_method
+    if explanation.channel_coupling_off_diag_norm is not None:
+        explanation_block["channel_coupling_off_diag_norm"] = _scalar_to_jsonable(
+            explanation.channel_coupling_off_diag_norm
+        )
 
     return {
         "metadata": {
@@ -1474,7 +1389,7 @@ def _save_channel_coupling_artifacts(
         c = int(coupling_matrix.shape[0])
         fig, ax = plt.subplots(figsize=(max(6.0, c * 0.45), max(5.0, c * 0.42)))
         im = ax.imshow(coupling_matrix, aspect="auto", cmap="magma")
-        ax.set_title("Channel coupling matrix (Harsanyi dividends)")
+        ax.set_title("Channel coupling matrix G (Harsanyi dividends)")
         ax.set_xticks(range(c))
         ax.set_yticks(range(c))
         ax.set_xticklabels(labels, rotation=45, ha="right")
