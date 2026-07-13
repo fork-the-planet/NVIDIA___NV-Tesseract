@@ -11,6 +11,7 @@ Programmatic entry point for running `perform_forecasting()` on pandas DataFrame
 - **Column alignment**: Automatically handles datasets with different feature sets by aligning to common columns, preventing broadcasting errors.
 - **Diverse output**: Produces hybrid, direct, and kNN forecasts when context is provided; otherwise returns only the direct forecast column.
 - **Built-in interpretability**: Opt-in `interpretability=True` flag produces a horizon-resolved lag attribution matrix, supporting CSVs / heatmap PNG, a `semantic_flow.csv` of per-transition latent flow magnitudes labeled by history/forecast segment, an `explanation.json` (lag×horizon, latent trajectory, semantic-flow magnitudes, forecast-vs-history diagnostics, and a `trajectory_stability` block of temporal-smoothness metrics), and a self-contained PDF report whose final pages cover semantic-flow magnitudes (line chart over the history/forecast split with per-segment summary statistics and the four forecast-vs-history diagnostic ratios) and latent-trajectory stability. Output format is selectable via `interpretability_output` (`"json"`, `"pdf"`, or `None` for both).
+- **Multi-GPU Pass A ‖ Pass B**: On multi-GPU hosts, Pass A (Jacobian channel flow) and Pass B (Shapley coupling) run concurrently across devices; Pass B can be further sharded across N GPUs for linear speedup on large transition counts.
 
 ## Installation
 
@@ -179,6 +180,18 @@ perform_forecasting(
     n_lags: int = 128,
     softmax_tau: float = 1.0,
 
+    # v2 channel-axis interpretability
+    interpretability_channel_axis: Optional[bool] = None,
+    interpretability_coupling: Optional[bool] = None,
+    interpretability_coupling_transitions: int = 16,
+    interpretability_shapley_n_samples: int = 64,
+    interpretability_shapley_baseline: str = "zero",
+    interpretability_transition_batch: int = 8,
+    interpretability_channel_batch_size: int = 64,
+    interpretability_devices: Optional[str] = None,
+    interpretability_parallel_passes: bool = False,
+    interpretability_shapley_workers: int = 0,
+
     # Multichannel output
     return_all_channels: bool = False,
 ) -> pd.DataFrame
@@ -210,6 +223,16 @@ perform_forecasting(
 | `n_lags` | Number of past steps the lag-attribution matrix resolves (default `128`) |
 | `softmax_tau` | Temperature applied when softmaxing scores into per-horizon attribution |
 | `return_all_channels` | When `True`, the result contains one `{column}_forecast` column per processed channel (target column first, then the remaining numeric features) instead of only `{target_column}_forecast`. Not supported with `interpretability=True` (raises `ValueError`) |
+| `interpretability_channel_axis` | Enable v2 per-channel Jacobian flow (auto-enabled for `C > 1`) |
+| `interpretability_coupling` | Enable Shapley channel coupling matrix (auto-enabled for `C > 1`) |
+| `interpretability_coupling_transitions` | Number of time slices sampled for coupling estimation (default `16`) |
+| `interpretability_shapley_n_samples` | KernelSHAP coalition samples per transition (default `64`) |
+| `interpretability_shapley_baseline` | Ablation baseline strategy: `"zero"` or `"mean"` |
+| `interpretability_transition_batch` | Transitions processed per forward pass during Shapley (default `8`) |
+| `interpretability_channel_batch_size` | Channels batched per Jacobian backward pass (default `64`) |
+| `interpretability_devices` | Device spec for multi-GPU dispatch (e.g. `"cuda:0,cuda:1"`); defaults to auto |
+| `interpretability_parallel_passes` | When `True`, Pass A and Pass B run concurrently on separate GPUs |
+| `interpretability_shapley_workers` | Number of GPUs to shard Pass B across (`0` = serial, `≥2` = sharded) |
 
 ## Preprocessing expectations
 
@@ -247,8 +270,34 @@ When `interpretability=True`, the run directory contains the following files (se
 | `lag_horizon_heatmap.png` | pdf, both *(needs matplotlib)* | Visual heatmap, viridis cmap |
 | `semantic_flow.csv` | pdf, both | Tidy `(transition_index, segment, flow_magnitude)` table, where `segment` is `history` for transitions fully inside the input window, `forecast` for transitions whose window extends into the model-generated future, and `tail` for any trailing transitions outside both segments |
 | `explanation_report.pdf` | pdf, both *(needs matplotlib)* | Multi-page report: (1) cover with metadata, (2) forecast preview, (3) lag×horizon heatmap, (4) top-`interpretability_top_k` lag-step tables, (5) semantic-flow magnitudes page with the per-transition flow time series (history/forecast split annotated), a per-segment summary (mean / median / p95 / max / variance / transition count) and the four forecast-vs-history diagnostic ratios (`flow_ratio`, `flow_variance_ratio`, `curvature_ratio`, `latent_diag_mahalanobis_ratio`), (6) latent-trajectory stability table with per-dimension zero-crossing / direction-flip / relative-jitter (mean & p95) and occupancy metrics |
+| `channel_coupling_matrix.csv` | multivariate inputs | `C×C` coupling matrix `Γ[i,j]` — how much channel `j` influences the forecast via channel `i` |
+| `channel_coupling_heatmap.png` | multivariate inputs *(needs matplotlib)* | Heatmap of the channel coupling matrix |
 
 The run directory path is printed on stdout when the call completes.
+
+## Multi-GPU channel-axis interpretability
+
+On hosts with 2+ CUDA devices, Pass A (Jacobian) and Pass B (Shapley coupling) can run concurrently, and Pass B can be sharded across N GPUs:
+
+```python
+perform_forecasting(
+    df=df_multivariate,
+    interpretability=True,
+    interpretability_coupling=True,
+    interpretability_coupling_transitions=128,
+    interpretability_shapley_workers=2,     # shard Pass B across 2 extra GPUs
+    interpretability_parallel_passes=True,  # overlap Pass A on cuda:0
+)
+```
+
+Benchmark CLI (requires 2+ CUDA devices):
+
+```bash
+uv run python run_interpretability_sharded.py \
+    --shapley-workers 2 --parallel-passes \
+    --coupling-transitions 128 --shapley-n-samples 32 \
+    --benchmark
+```
 
 ## Error handling
 
@@ -302,4 +351,4 @@ Common safeguards raised as `ValueError` include:
 
 ## Examples and tests
 
-See `tesseract_forecasting/sdk/tests/test_forecasting.py` for unit test coverage with mockers and `sdk/quick_example.py` for an end-to-end script.
+See `sdk/tests/test_forecasting.py` for unit test coverage with mockers and `sdk/quick_example.py` for an end-to-end script. For multi-GPU interpretability benchmarking (Pass A ‖ Pass B sharding) see `run_interpretability_sharded.py`.

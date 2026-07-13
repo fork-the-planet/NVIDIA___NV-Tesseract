@@ -137,19 +137,21 @@ source .venv/bin/activate  # Activate environment (Unix)
 
 ```
 forecasting/
-├── pyproject.toml         # Project configuration and dependencies
-├── README.md             # This file
+├── pyproject.toml                    # Project configuration and dependencies
+├── README.md                         # This file
 ├── examples/
-│   └── finetune_example.py # CSV fine-tuning example
+│   └── finetune_example.py           # CSV fine-tuning example
 ├── sdk/
-│   ├── forecasting.py    # Main forecasting module (with auto-download)
-│   ├── quick_example.py  # Example usage script
-│   └── tests/            # Test files and datasets
-├── dataset_longhorizon.py # Dataset utilities
-├── interpretability.py   # Model-agnostic explanation engine (lag x horizon)
-├── model.py              # Model building utilities
-├── standardizer.pkl      # Normalization params (auto-downloaded on first use)
-└── moment_head_512_6hr.pt  # Head checkpoint (auto-downloaded on first use)
+│   ├── forecasting.py                # Main SDK entry point (with auto-download)
+│   ├── quick_example.py              # End-to-end demo script
+│   └── tests/                        # Test files and datasets
+├── dataset_longhorizon.py            # Dataset utilities and Standardizer
+├── interpretability.py               # Model-agnostic explanation engine (semantic flow, lag×horizon, trajectory stability, PDF report)
+├── channel_flow.py                   # v2 per-channel Jacobian/Shapley flow + coupling
+├── interpretability_parallel.py      # Multi-GPU Pass A / Pass B dispatch + sharding
+├── parallel.py                       # GPU worker pool + surrogate thread pool
+├── run_interpretability_sharded.py   # CLI benchmark for multi-GPU interpretability (Pass A ‖ Pass B sharding)
+└── model.py                          # Model building utilities
 ```
 
 ## Dependencies
@@ -198,7 +200,7 @@ Modern deep-learning forecasters predict but don't explain — they can't answer
 
 NV-Tesseract ships a **Model Agnostic Interpretability Framework** that produces localized, horizon-specific, time-aware explanations without modifying the underlying forecaster. It targets real-world deployments — finance risk, energy grids, manufacturing — where a black-box prediction is not enough.
 
-### The Lag–Horizon Attribution Engine
+### The Lag–Horizon Attribution Engine (v1)
 
 The framework's core component is the **Lag–Horizon Attribution Engine**, which turns the computed semantic flow (the step-by-step transformation of the model's internal state in latent space) into influence scores. Its output is the **Lag–Horizon Attribution Matrix** `F`:
 
@@ -208,9 +210,48 @@ The framework's core component is the **Lag–Horizon Attribution Engine**, whic
 
 Internally `F` is computed by composing the model's consecutive flow operators along the latent path from each past input to each future prediction; per horizon, the scores are softmax-normalized into attributions.
 
+### v2 Channel-Axis Flow (multivariate)
+
+For multivariate inputs (`C > 1` channels), NV-Tesseract runs a second analysis pass that decomposes **how channels interact** with one another and with the forecast:
+
+- **Pass A — Jacobian channel flow**: computes per-channel flow `G[C, L]` via automatic differentiation (O(C) backward passes). Runs on the primary GPU concurrently with the lag-attribution engine.
+- **Pass B — Shapley coupling**: estimates the **channel coupling matrix** `Γ[C, C]` using KernelSHAP coalitional sampling over the trailing `coupling_transitions` time slices. Each entry `Γ[i, j]` quantifies how much channel `j` non-additively influences the forecast through its interaction with channel `i` (Harsanyi dividend decomposition).
+
+Both passes activate automatically when `C > 1` and `interpretability=True` — no extra flags required. The coupling matrix is saved as `channel_coupling_matrix.csv` (and a heatmap PNG when matplotlib is installed).
+
+### Multi-GPU Pass A ‖ Pass B sharding
+
+On hosts with multiple CUDA devices the largest interpretability speedup comes from **sharding Pass B (Shapley + coupling)** across GPUs. Each shard processes an independent subset of the `coupling_transitions` time slices in parallel; partial coupling matrices are merged via `merge_shapley_reports`.
+
+```python
+perform_forecasting(
+    df=df_multivariate,
+    interpretability=True,
+    interpretability_coupling=True,
+    interpretability_coupling_transitions=128,   # more transitions = better coverage
+    interpretability_shapley_workers=2,          # shard Pass B across 2 GPUs
+    interpretability_parallel_passes=True,       # overlap Pass A on cuda:0
+)
+```
+
+Standalone benchmark CLI (requires 2+ CUDA devices; single-GPU/MPS runs serial):
+
+```bash
+# compare serial Pass B vs 2-shard parallel Pass B
+uv run python run_interpretability_sharded.py \
+    --shapley-workers 2 --parallel-passes \
+    --coupling-transitions 128 --shapley-n-samples 32 \
+    --benchmark
+
+# model head size and explanation window are independent:
+#   --model-horizon 72 --forecast-horizon 100
+```
+
+See `sdk/quick_example.py` (set `RUN_MULTI_GPU_INTERP=1` on multi-GPU hosts) and `sdk/README.md` for the full parameter reference.
+
 ### What the SDK gives you
 
-When you call `perform_forecasting(..., interpretability=True)` the SDK runs the same loaded model on the trailing window and writes a self-contained explanation bundle: the K×H matrix as wide and long CSVs, a heatmap PNG, a per-transition `semantic_flow.csv` with a `history`/`forecast` segment label, a full `explanation.json` (baseline forecast, lag×horizon scores and attributions, latent trajectory, semantic-flow magnitudes, diagnostic ratios that flag whether the forecast segment is volatile relative to history, and a `trajectory_stability` block with temporal-smoothness metrics over the context window), and a multi-page PDF report whose final pages surface (a) the semantic-flow time series with a history/forecast split chart, per-segment summary statistics, and the forecast-vs-history diagnostic ratios, and (b) the latent-trajectory stability metrics. See the **Interpretability (Lag x Horizon Explanations)** example below for the call shape and `sdk/README.md` for the full parameter reference and on-disk artifact catalogue.
+When you call `perform_forecasting(..., interpretability=True)` the SDK runs the same loaded model on the trailing window and writes a self-contained explanation bundle: the K×H matrix as wide and long CSVs, a heatmap PNG, a per-transition `semantic_flow.csv` with a `history`/`forecast` segment label, a full `explanation.json` (baseline forecast, lag×horizon scores and attributions, latent trajectory, semantic-flow magnitudes, diagnostic ratios that flag whether the forecast segment is volatile relative to history, and a `trajectory_stability` block with temporal-smoothness metrics over the context window), and a multi-page PDF report. For multivariate inputs, `channel_coupling_matrix.csv` and `channel_coupling_heatmap.png` are added to the bundle. See the **Interpretability (Lag x Horizon Explanations)** example below for the call shape and `sdk/README.md` for the full parameter reference and on-disk artifact catalogue.
 
 ## Usage Examples
 

@@ -35,10 +35,13 @@ Stability / quality notes:
 
 import warnings
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 import numpy as np
 import torch
+
+if TYPE_CHECKING:
+    from channel_flow import ChannelFlowConfig
 
 Array = np.ndarray
 
@@ -181,6 +184,27 @@ class ForecastExplanation:
       - curvature_ratio_forecast_vs_history: compares second-difference energy of Z in forecast vs history.
       - latent_diag_mahalanobis_ratio_forecast_vs_history: compares a diagonal-Mahalanobis latent distance
         in forecast vs history (OOD shift indicator).
+
+    Feature-axis (v2) outputs (populated only when ``explain_forecast`` is
+    called with ``channel_axis=True``):
+      - per_channel_flow: [T-1, C] -- per-channel decomposition of latent
+        flow (phi_tau(c)).
+      - lag_channel_horizon_scores: [K, C, H] -- joint score tensor before
+        normalization.
+      - lag_channel_horizon_attributions: [K, C, H] -- softmax-normalized
+        joint lag x channel x horizon attribution.
+      - channel_horizon_attributions: [C, H] -- channel-marginal of the
+        joint attribution; suitable for channel-axis faithfulness benchmarks.
+      - channel_coupling_matrix: [C, C] -- Harsanyi dividend matrix
+        diagnosing cross-channel interaction; symmetric, zero diagonal.
+      - channel_flow_method: which estimator produced the above
+        ("jacobian" / "shapley_exact" / "shapley_kernel").
+      - channel_flow_residual_ratio_mean / _p95: trust-region diagnostic for
+        the Jacobian variant. ``|| Delta Z - sum_c Delta Z^(c) || / ||Delta Z||``
+        averaged over transitions; lower is better.
+      - channel_coupling_off_diag_norm: Frobenius norm of the off-diagonal
+        coupling matrix; sharply distinguishes channel-mixing models (large)
+        from channel-independent ones (~0).
     """
 
     baseline_forecast: Array
@@ -195,6 +219,16 @@ class ForecastExplanation:
     flow_variance_ratio_forecast_vs_history: float | None = None
     curvature_ratio_forecast_vs_history: float | None = None
     latent_diag_mahalanobis_ratio_forecast_vs_history: float | None = None
+    # v2 feature-axis outputs (None when channel_axis=False)
+    per_channel_flow: Array | None = None
+    lag_channel_horizon_scores: Array | None = None
+    lag_channel_horizon_attributions: Array | None = None
+    channel_horizon_attributions: Array | None = None
+    channel_coupling_matrix: Array | None = None
+    channel_flow_method: str | None = None
+    channel_flow_residual_ratio_mean: float | None = None
+    channel_flow_residual_ratio_p95: float | None = None
+    channel_coupling_off_diag_norm: float | None = None
 
 
 def _flow_segment_ratios(
@@ -1239,6 +1273,7 @@ def fit_horizon_surrogates(
     pert_cfg: PerturbationConfig,
     surr_cfg: SurrogateConfig,
     batch_size: int = 16,
+    n_jobs: int | None = None,
 ) -> tuple[Array, Array, str]:
     """
     Local Surrogate Modeling Module.
@@ -1298,25 +1333,49 @@ def fit_horizon_surrogates(
     dist2 = np.sum(dz * dz, axis=1).astype(np.float32)
     w = np.exp(-float(surr_cfg.distance_lambda) * dist2).astype(np.float32) + 1e-12
 
-    # Fit per horizon+channel
+    # Fit per horizon+channel. Each (c, h) regression is independent and
+    # CPU-bound (NumPy / BLAS), so we farm them out to a thread pool when
+    # ``n_jobs > 1``. ISTA's inner loops call into NumPy linalg which
+    # releases the GIL, so threads scale better than processes here and
+    # avoid pickling the (potentially large) shared X / w buffers.
     H = int(forecast_horizon)
     P = X.shape[1]
     coef = np.zeros((C, H, P), dtype=np.float32)  # [C,H,P]
     intercept = np.zeros((C, H), dtype=np.float32)  # [C,H]
 
-    for c in range(C):
-        for h in range(H):
-            y = Y[:, c, h]
-            b, a0 = _ista_weighted_lasso(
-                X,
-                y,
-                w,
-                alpha=float(surr_cfg.l1_alpha),
-                max_iter=int(surr_cfg.max_iter),
-                tol=float(surr_cfg.tol),
-            )
-            coef[c, h] = b
-            intercept[c, h] = a0
+    alpha = float(surr_cfg.l1_alpha)
+    max_iter = int(surr_cfg.max_iter)
+    tol = float(surr_cfg.tol)
+
+    def _solve_one(args: tuple[int, int]) -> tuple[int, int, Array, float]:
+        c_idx, h_idx = args
+        b, a0 = _ista_weighted_lasso(
+            X,
+            Y[:, c_idx, h_idx],
+            w,
+            alpha=alpha,
+            max_iter=max_iter,
+            tol=tol,
+        )
+        return c_idx, h_idx, b, a0
+
+    work_items = [(c, h) for c in range(C) for h in range(H)]
+
+    # Default: 1 thread (matches historical behaviour). Callers that want
+    # the parallel path opt in via ``n_jobs`` (typically the OS CPU count
+    # divided by the number of GPU workers, so threads do not oversubscribe
+    # cores in a multi-GPU run).
+    if n_jobs is not None and int(n_jobs) > 1 and len(work_items) > 1:
+        from parallel import parallel_apply_threads
+
+        for c_idx, h_idx, b, a0 in parallel_apply_threads(_solve_one, work_items, n_jobs=int(n_jobs)):
+            coef[c_idx, h_idx] = b
+            intercept[c_idx, h_idx] = a0
+    else:
+        for item in work_items:
+            c_idx, h_idx, b, a0 = _solve_one(item)
+            coef[c_idx, h_idx] = b
+            intercept[c_idx, h_idx] = a0
 
     return coef, intercept, feature_layout
 
@@ -1336,6 +1395,13 @@ def explain_forecast(
     pert_cfg: PerturbationConfig | None = None,
     surr_cfg: SurrogateConfig | None = None,
     latent_batch_size: int = 32,
+    surrogate_n_jobs: int | None = None,
+    # v2 feature-axis switches
+    channel_axis: bool = False,
+    chan_cfg: ChannelFlowConfig | None = None,  # forward ref; imported lazily
+    channel_softmax_tau: float | None = None,
+    channel_output_aware: bool = False,
+    channel_target: int | None = None,
 ) -> ForecastExplanation:
     """
     End-to-end interpretability pipeline:
@@ -1344,6 +1410,17 @@ def explain_forecast(
       3) Semantic flow magnitudes
       4) Lag x Horizon attribution matrix + horizon-wise softmax
       5) Optional horizon-specific local surrogates with structure-preserving perturbations
+
+    When ``channel_axis=True`` (and the input has C > 1 channels) we additionally
+    run the v2 feature-axis stages: per-channel flow decomposition, joint
+    lag x channel x horizon attribution, and -- for the Shapley variant --
+    the cross-channel coupling matrix.
+
+    Pass ``chan_cfg`` to control the per-channel flow estimator. When
+    ``chan_cfg`` is None we default to ``ChannelFlowConfig()`` (Jacobian
+    variant), which is the fast O(C) estimator suitable for routine use.
+    Use ``ChannelFlowConfig(method="shapley")`` when you need the axiomatic
+    decomposition or the coupling matrix for a paper figure.
     """
     flow_cfg = flow_cfg or SemanticFlowConfig()
     pert_cfg = pert_cfg or PerturbationConfig()
@@ -1431,7 +1508,79 @@ def explain_forecast(
             device=device,
             pert_cfg=pert_cfg,
             surr_cfg=surr_cfg,
+            n_jobs=surrogate_n_jobs,
         )
+
+    # --- 6) v2 feature-axis stages (optional) ---
+    per_chan_flow = None
+    lag_chan_scores = None
+    lag_chan_attrib = None
+    chan_horizon_attrib = None
+    coupling_mat = None
+    chan_method = None
+    chan_resid_mean = None
+    chan_resid_p95 = None
+    coupling_norm = None
+    if channel_axis:
+        from channel_flow import (  # local import avoids circular dependency at module load
+            ChannelFlowConfig,
+            channel_horizon_marginal,
+            compute_per_channel_flow,
+            lag_channel_horizon_attribution,
+            make_target_forecast_value_fn,
+        )
+
+        chan_cfg_eff = chan_cfg if chan_cfg is not None else ChannelFlowConfig()
+        # ``channel_output_aware`` selects the flow's value function: the default
+        # latent embedding (output-agnostic "semantic flow"; feeds the coupling
+        # matrix and the Prop-1/Prop-2 reductions) or the target channel's
+        # forecast (output-aware; the target-specific attribution that the
+        # channel-faithfulness metric scores). The latent default is preserved
+        # so existing coupling / Prop experiments are unchanged.
+        chan_value_fn = None
+        if channel_output_aware:
+            if channel_target is None:
+                raise ValueError(
+                    "channel_output_aware=True requires channel_target (the forecast "
+                    "channel whose prediction the attribution should explain)."
+                )
+            chan_value_fn = make_target_forecast_value_fn(
+                target_channel=int(channel_target),
+                model_horizon=int(model_horizon),
+                forecast_horizon=int(forecast_horizon),
+            )
+        # Channel-flow operates on the same extended series so lag indices match v1.
+        # In output-aware mode we protect the target channel from ablation in the
+        # Shapley game (ablating it destroys the target signal and biases the
+        # non-target attributions); ignored by the Jacobian estimator.
+        chan_protect = (int(channel_target),) if channel_output_aware and channel_target is not None else None
+        report = compute_per_channel_flow(
+            model,
+            series_ext,
+            seq_len=L,
+            input_mask_t=mask_ext,
+            device=device,
+            cfg=chan_cfg_eff,
+            value_fn=chan_value_fn,
+            protect_channels=chan_protect,
+        )
+        per_chan_flow = report.per_channel_flow
+        chan_method = report.method
+        chan_resid_mean = report.residual_ratio_mean
+        chan_resid_p95 = report.residual_ratio_p95
+        coupling_mat = report.coupling_matrix
+        coupling_norm = report.coupling_off_diag_norm
+
+        chan_tau = float(channel_softmax_tau) if channel_softmax_tau is not None else float(softmax_tau)
+        lag_chan_scores, lag_chan_attrib = lag_channel_horizon_attribution(
+            per_chan_flow,
+            t_index=t_index,
+            n_lags=K,
+            horizon=int(forecast_horizon),
+            softmax_tau=chan_tau,
+            normalize="joint",
+        )
+        chan_horizon_attrib = channel_horizon_marginal(lag_chan_attrib)
 
     return ForecastExplanation(
         baseline_forecast=base,
@@ -1446,4 +1595,13 @@ def explain_forecast(
         flow_variance_ratio_forecast_vs_history=flow_var_ratio,
         curvature_ratio_forecast_vs_history=curvature_ratio,
         latent_diag_mahalanobis_ratio_forecast_vs_history=maha_ratio,
+        per_channel_flow=per_chan_flow,
+        lag_channel_horizon_scores=lag_chan_scores,
+        lag_channel_horizon_attributions=lag_chan_attrib,
+        channel_horizon_attributions=chan_horizon_attrib,
+        channel_coupling_matrix=coupling_mat,
+        channel_flow_method=chan_method,
+        channel_flow_residual_ratio_mean=chan_resid_mean,
+        channel_flow_residual_ratio_p95=chan_resid_p95,
+        channel_coupling_off_diag_norm=coupling_norm,
     )
