@@ -1315,13 +1315,9 @@ def _explanation_to_dict(
             explanation.lag_channel_horizon_attributions
         )
     if explanation.channel_horizon_attributions is not None:
-        explanation_block["channel_horizon_attributions"] = _array_to_jsonable(
-            explanation.channel_horizon_attributions
-        )
+        explanation_block["channel_horizon_attributions"] = _array_to_jsonable(explanation.channel_horizon_attributions)
     if explanation.channel_coupling_matrix is not None:
-        explanation_block["channel_coupling_matrix"] = _array_to_jsonable(
-            explanation.channel_coupling_matrix
-        )
+        explanation_block["channel_coupling_matrix"] = _array_to_jsonable(explanation.channel_coupling_matrix)
     if explanation.channel_flow_method is not None:
         explanation_block["channel_flow_method"] = explanation.channel_flow_method
     if explanation.channel_coupling_off_diag_norm is not None:
@@ -1379,9 +1375,7 @@ def _save_channel_coupling_artifacts(
 ) -> None:
     """Write Pass B coupling matrix CSV (and heatmap when matplotlib is available)."""
     labels = [str(lab) for lab in channel_labels]
-    pd.DataFrame(coupling_matrix, index=labels, columns=labels).to_csv(
-        run_dir / "channel_coupling_matrix.csv"
-    )
+    pd.DataFrame(coupling_matrix, index=labels, columns=labels).to_csv(run_dir / "channel_coupling_matrix.csv")
     try:
         import matplotlib.pyplot as plt
 

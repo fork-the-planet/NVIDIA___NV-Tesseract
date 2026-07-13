@@ -49,9 +49,7 @@ from sdk.forecasting import (
     download_model_weights,
 )
 
-_DEFAULT_CSV = (
-    Path(__file__).resolve().parent / "sdk" / "tests" / "datasets" / "ETTh_4feature.csv"
-)
+_DEFAULT_CSV = Path(__file__).resolve().parent / "sdk" / "tests" / "datasets" / "ETTh_4feature.csv"
 
 
 def _load_standardizer(path: str) -> Standardizer:
@@ -97,36 +95,53 @@ def main() -> None:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--csv", type=Path, default=_DEFAULT_CSV,
-                   help="Input CSV with a timestamp column and one or more feature columns")
+    p.add_argument(
+        "--csv",
+        type=Path,
+        default=_DEFAULT_CSV,
+        help="Input CSV with a timestamp column and one or more feature columns",
+    )
     p.add_argument("--seq-len", type=int, default=512)
     p.add_argument(
-        "--model-horizon", type=int, default=72,
+        "--model-horizon",
+        type=int,
+        default=72,
         help="Native checkpoint head size (must match the .pt file; default 72 for run8_best_model_cr.pt)",
     )
     p.add_argument(
-        "--forecast-horizon", type=int, default=100,
+        "--forecast-horizon",
+        type=int,
+        default=100,
         help="Explanation / Pass B extension length (may exceed model_horizon)",
     )
     p.add_argument("--n-lags", type=int, default=128)
-    p.add_argument("--coupling-transitions", type=int, default=128,
-                   help="Number of Shapley transitions for Pass B (more = slower but more coupling coverage)")
-    p.add_argument("--shapley-n-samples", type=int, default=32,
-                   help="KernelSHAP samples per transition")
+    p.add_argument(
+        "--coupling-transitions",
+        type=int,
+        default=128,
+        help="Number of Shapley transitions for Pass B (more = slower but more coupling coverage)",
+    )
+    p.add_argument("--shapley-n-samples", type=int, default=32, help="KernelSHAP samples per transition")
     p.add_argument("--standardizer", default="standardizer.pkl")
     p.add_argument("--ckpt", default=DEFAULT_CROSS_CHANNEL_CHECKPOINT_NAME)
     p.add_argument("--model-name", default=DEFAULT_BACKBONE_NAME)
-    p.add_argument("--devices", default="auto",
-                   help="Device spec: auto | cpu | cuda:0 | cuda:0,cuda:1 | ...")
-    p.add_argument("--shapley-workers", type=int, default=0,
-                   help="Shard Pass B across N GPUs (0 = off; >=2 activates sharding)")
-    p.add_argument("--parallel-passes", action="store_true",
-                   help="Run Pass A (Jacobian, GPU 0) in parallel with sharded Pass B")
-    p.add_argument("--transition-batch", type=int, default=8,
-                   help="Stack N transitions into one GPU forward pass (amortises kernel launch)")
+    p.add_argument("--devices", default="auto", help="Device spec: auto | cpu | cuda:0 | cuda:0,cuda:1 | ...")
+    p.add_argument(
+        "--shapley-workers", type=int, default=0, help="Shard Pass B across N GPUs (0 = off; >=2 activates sharding)"
+    )
+    p.add_argument(
+        "--parallel-passes", action="store_true", help="Run Pass A (Jacobian, GPU 0) in parallel with sharded Pass B"
+    )
+    p.add_argument(
+        "--transition-batch",
+        type=int,
+        default=8,
+        help="Stack N transitions into one GPU forward pass (amortises kernel launch)",
+    )
     p.add_argument("--chan-batch-size", type=int, default=64)
     p.add_argument(
-        "--benchmark", action="store_true",
+        "--benchmark",
+        action="store_true",
         help="Compare serial Pass B vs multi-GPU sharded Pass B (requires 2+ CUDA devices)",
     )
     args = p.parse_args()
@@ -144,9 +159,7 @@ def main() -> None:
     seq_len = int(args.seq_len)
     model_horizon = int(args.model_horizon)
     forecast_horizon = int(args.forecast_horizon)
-    x_ct, input_mask_l, _labels, c_use = _load_context_window(
-        csv_path, seq_len=seq_len, standardizer=standardizer
-    )
+    x_ct, input_mask_l, _labels, c_use = _load_context_window(csv_path, seq_len=seq_len, standardizer=standardizer)
 
     devices = parse_devices_arg(str(args.devices))
     n_cuda = sum(1 for d in devices if d.type == "cuda")
@@ -170,8 +183,7 @@ def main() -> None:
     if args.benchmark:
         if n_cuda < 2:
             print(
-                "[err] --benchmark compares serial vs multi-GPU sharding and needs "
-                f"2+ CUDA devices (got {devices}).",
+                f"[err] --benchmark compares serial vs multi-GPU sharding and needs 2+ CUDA devices (got {devices}).",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -241,8 +253,7 @@ def main() -> None:
     )
     if result.coupling_report is not None:
         print(
-            f"coupling_off_diag_norm={result.coupling_report.coupling_off_diag_norm:.4e}  "
-            f"parallel={result.parallel}",
+            f"coupling_off_diag_norm={result.coupling_report.coupling_off_diag_norm:.4e}  parallel={result.parallel}",
             flush=True,
         )
 

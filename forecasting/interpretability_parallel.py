@@ -3,10 +3,10 @@
 
 """Multi-GPU interpretability passes (Pass A Jacobian + Pass B Shapley/coupling).
 
-  * Pass A: ``explain_forecast(channel_axis=True, chan_cfg=jacobian)``
-  * Pass B: ``compute_per_channel_flow(method=shapley, compute_coupling=True)``
-  * Optional: Pass A on device 0 while Pass B is sharded across extra GPUs via
-    ``shard_transitions`` + ``parallel_map_with_init`` + ``merge_shapley_reports``.
+* Pass A: ``explain_forecast(channel_axis=True, chan_cfg=jacobian)``
+* Pass B: ``compute_per_channel_flow(method=shapley, compute_coupling=True)``
+* Optional: Pass A on device 0 while Pass B is sharded across extra GPUs via
+  ``shard_transitions`` + ``parallel_map_with_init`` + ``merge_shapley_reports``.
 """
 
 from __future__ import annotations
@@ -260,8 +260,10 @@ def should_run_parallel_passes(
     """Whether to dispatch Pass A and Pass B across multiple worker processes."""
     if not use_channel_axis or not run_coupling:
         return False
-    return bool(parallel_passes) or int(shapley_workers) >= 2 or (
-        len(devices) >= 2 and all(d.type == "cuda" for d in devices[:2])
+    return (
+        bool(parallel_passes)
+        or int(shapley_workers) >= 2
+        or (len(devices) >= 2 and all(d.type == "cuda" for d in devices[:2]))
     )
 
 
@@ -442,9 +444,7 @@ def run_interpretability_passes(
         device = devices[0]
 
     run_coupling = bool(cfg.run_coupling) and use_channel_axis
-    chan_cfg_jac, chan_cfg_sh, series_ext, mask_ext, coup_transitions = build_pass_configs(
-        x_ct, cfg=cfg
-    )
+    chan_cfg_jac, chan_cfg_sh, series_ext, mask_ext, coup_transitions = build_pass_configs(x_ct, cfg=cfg)
 
     pp_enabled = should_run_parallel_passes(
         devices,
@@ -456,8 +456,7 @@ def run_interpretability_passes(
 
     if pp_enabled and len(devices) < 2:
         logger.warning(
-            "[interpretability] parallel passes requested but only one device; "
-            "running sequentially on %s.",
+            "[interpretability] parallel passes requested but only one device; running sequentially on %s.",
             devices[0],
         )
         pp_enabled = False
@@ -501,9 +500,7 @@ def run_interpretability_passes(
 
     if model is None:
         if ckpt_path is None:
-            raise ValueError(
-                "model or ckpt_path is required for sequential interpretability passes"
-            )
+            raise ValueError("model or ckpt_path is required for sequential interpretability passes")
         init_fn = _WorkerInit(
             ckpt_path=str(ckpt_path),
             model_name=model_name,
