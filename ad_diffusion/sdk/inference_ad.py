@@ -82,7 +82,12 @@ from models.utils import evaluate
 from utils.tsb_ad_preprocessor import preprocess_for_inference
 
 # DEVICE configuration - simplified for standalone use
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+if torch.cuda.is_available():
+    DEVICE = "cuda"
+elif torch.backends.mps.is_available():
+    DEVICE = "mps"
+else:
+    DEVICE = "cpu"
 
 # Default Hugging Face repository and asset names for the AD Diffusion model
 HF_REPO_ID = "nvidia/nv-tesseract-ad-diffusion"
@@ -123,10 +128,11 @@ def set_seed(seed: int = DEFAULT_SEED) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 
 # Note: set_seed() is NOT called at module load to avoid affecting other code.
