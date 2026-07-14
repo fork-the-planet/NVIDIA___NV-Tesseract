@@ -317,7 +317,7 @@ def _load_run_config(path: str) -> dict[str, Any]:
     """Load a JSON or YAML run config written by AutoMLRunner at {config_path}."""
     p = Path(path)
     with p.open() as f:
-        if p.suffix in {".json"}:
+        if p.suffix == ".json":
             return json.load(f)
         return yaml.safe_load(f) or {}
 
@@ -327,20 +327,20 @@ def _run_config_defaults(cfg: dict[str, Any]) -> dict[str, Any]:
     ds = cfg.get("dataset", {})
     tr = cfg.get("train", {})
     mapping = {
-        "csv":           ds.get("csv"),
-        "val_ratio":     ds.get("val_ratio"),
+        "csv": ds.get("csv"),
+        "val_ratio": ds.get("val_ratio"),
         "timestamp_col": ds.get("timestamp_col"),
-        "mask_ratio":    ds.get("mask_ratio"),
+        "mask_ratio": ds.get("mask_ratio"),
         "window_length": ds.get("window_length"),
         "window_stride": ds.get("window_stride"),
-        "split":         ds.get("split"),
-        "lr":            tr.get("lr"),
-        "batch_size":    tr.get("batch_size"),
-        "weight_decay":  tr.get("weight_decay"),
-        "grad_clip":     tr.get("grad_clip"),
-        "epochs":        tr.get("epochs"),
-        "seed":          tr.get("seed"),
-        "output_dir":    tr.get("output_dir"),
+        "split": ds.get("split"),
+        "lr": tr.get("lr"),
+        "batch_size": tr.get("batch_size"),
+        "weight_decay": tr.get("weight_decay"),
+        "grad_clip": tr.get("grad_clip"),
+        "epochs": tr.get("epochs"),
+        "seed": tr.get("seed"),
+        "output_dir": tr.get("output_dir"),
     }
     return {k: v for k, v in mapping.items() if v is not None}
 
