@@ -1922,40 +1922,52 @@ def perform_forecasting(
                 context_numeric.remove(target_column)
 
             # COLUMN COMPATIBILITY CHECK AND ALIGNMENT
-            # Find intersection of numeric columns between main and context datasets
-            main_numeric_set = set(numeric_columns)
+            # Common feature columns in input-DataFrame order (target excluded;
+            # it is always included first). The canonical channel order is
+            # anchored to the input DataFrame so the caller/checkpoint-facing
+            # layout is preserved for the channels that remain. The context CSV
+            # always follows this canonical order (when the column lists already
+            # match, common_columns == context_numeric).
             context_numeric_set = set(context_numeric)
+            common_columns = [col for col in numeric_columns if col in context_numeric_set]
+            context_columns_to_use = [timestamp_column, target_column] + common_columns
 
-            # Common columns (excluding target which is always included)
-            common_columns = main_numeric_set.intersection(context_numeric_set)
-
-            # Check if we have column compatibility issues
-            if len(main_numeric_set) != len(context_numeric_set) or main_numeric_set != context_numeric_set:
-                logger.warning("Column mismatch detected between input and context datasets")
-                logger.warning("  Input dataset columns: %s", sorted(main_numeric_set))
-                logger.warning("  Context dataset columns: %s", sorted(context_numeric_set))
-                logger.warning("  Common columns: %s", sorted(common_columns))
-
-                if len(common_columns) == 0:
-                    raise ValueError(
-                        f"No common numeric columns found between input and context datasets.\n"
-                        f"Input dataset has: {sorted(main_numeric_set)}\n"
-                        f"Context dataset has: {sorted(context_numeric_set)}\n"
-                        f"For DARR mode to work, both datasets must share at least some numeric columns."
+            # Realign whenever the context column list differs from the input
+            # list. A set comparison is not enough: the same columns in a
+            # different order pass the downstream shape checks but blend
+            # mismatched channels in the hybrid output.
+            if numeric_columns != context_numeric:
+                if set(numeric_columns) == context_numeric_set:
+                    # Order-only difference: every column is kept. The main CSV
+                    # is already written in the canonical (input) order, so only
+                    # the context CSV needs realigning.
+                    logger.warning(
+                        "Context dataset lists the same numeric columns in a different order; "
+                        "realigning the context to the input column order: %s",
+                        common_columns,
                     )
+                else:
+                    logger.warning("Column mismatch detected between input and context datasets")
+                    logger.warning("  Input dataset columns: %s", numeric_columns)
+                    logger.warning("  Context dataset columns: %s", context_numeric)
+                    logger.warning("  Common columns (input order): %s", common_columns)
 
-                logger.warning("  Using only common columns for consistent predictions: %s", sorted(common_columns))
+                    if len(common_columns) == 0:
+                        raise ValueError(
+                            f"No common numeric columns found between input and context datasets.\n"
+                            f"Input dataset has: {numeric_columns}\n"
+                            f"Context dataset has: {context_numeric}\n"
+                            f"For DARR mode to work, both datasets must share at least some numeric columns."
+                        )
 
-                # Update both datasets to use only common columns
-                columns_to_process = [target_column] + sorted(common_columns)
-                context_columns_to_use = [timestamp_column, target_column] + sorted(common_columns)
+                    logger.warning("  Using only common columns for consistent predictions: %s", common_columns)
 
-                # Re-save the main CSV with aligned columns
-                csv_df = working_df[[timestamp_column] + columns_to_process].copy()
-                csv_df.rename(columns={timestamp_column: "timestamp"}, inplace=True)
-                csv_df.to_csv(temp_test_csv, index=False)
-            else:
-                context_columns_to_use = [timestamp_column, target_column] + context_numeric
+                    # The channel set narrowed: rewrite the main CSV in the same
+                    # canonical order as the context CSV.
+                    columns_to_process = [target_column] + common_columns
+                    csv_df = working_df[[timestamp_column] + columns_to_process].copy()
+                    csv_df.rename(columns={timestamp_column: "timestamp"}, inplace=True)
+                    csv_df.to_csv(temp_test_csv, index=False)
 
             # Create CSV with selected columns
             context_csv_df = context_working[context_columns_to_use].copy()
