@@ -488,8 +488,13 @@ def main() -> None:
         metrics[-1]["val_loss"],
         preprocessing,
     )
-    with (output_dir / "metrics.json").open("w") as f:
+    # Per-epoch log for human inspection.
+    with (output_dir / "epoch_metrics.json").open("w") as f:
         json.dump(metrics, f, indent=2)
+    # Scalar summary consumed by TAO AutoML runner metric extraction.
+    best_val_loss = min(m["val_loss"] for m in metrics) if metrics else float("inf")
+    with (output_dir / "metrics.json").open("w") as f:
+        json.dump({"val_loss": best_val_loss}, f)
     with (output_dir / "finetune_config.yaml").open("w") as f:
         yaml.safe_dump(config, f)
 
